@@ -1,3 +1,4 @@
+from openpilot.common.params import Params
 from opendbc.car import Bus, get_safety_config, structs
 from opendbc.car.interfaces import CarInterfaceBase
 from opendbc.car.tesla.carcontroller import CarController
@@ -66,5 +67,10 @@ class CarInterface(CarInterfaceBase):
     if 0x3DF in fingerprint[1]:
       ret.flags |= TeslaFlagsSP.HAS_VEHICLE_BUS.value
       ret.safetyParam |= TeslaSafetyFlagsSP.HAS_VEHICLE_BUS
+
+    p = Params()
+    if p.get_bool("TeslaFSDUnlock") or p.get_bool("TeslaNagKiller") or \
+       p.get_bool("TeslaISAChimeSuppress") or p.get_bool("TeslaPrecondition"):
+      ret.safetyParam |= TeslaSafetyFlagsSP.FSD_MOD
 
     return ret

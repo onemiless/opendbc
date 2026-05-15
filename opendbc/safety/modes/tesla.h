@@ -20,6 +20,7 @@
 static bool tesla_longitudinal = false;
 static bool tesla_fsd_14 = false;
 static bool tesla_stock_aeb = false;
+static bool tesla_fsd_mod = false;
 
 // Only rising edges while controls are not allowed are considered for these systems:
 
@@ -334,6 +335,32 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
     }
   }
 
+  // FSD mod messages: basic safety checks
+  if (tesla_fsd_mod) {
+    if (msg->addr == 0x370U) {
+      // Nag killer echo: must preserve steering signals, only modify hands-on and counter
+      // Verify checksum
+      uint8_t chksum = tesla_compute_checksum(msg);
+      if (chksum != tesla_get_checksum(msg)) {
+        violation = true;
+      }
+    }
+    if (msg->addr == 0x399U) {
+      // ISA speed chime suppression: verify checksum
+      uint8_t chksum = tesla_compute_checksum(msg);
+      if (chksum != tesla_get_checksum(msg)) {
+        violation = true;
+      }
+    }
+    if (msg->addr == 0x082U) {
+      // Precondition: only allow byte0 = 0x05
+      if ((msg->data[0] & 0x05U) != 0x05U) {
+        violation = true;
+      }
+    }
+    // 0x3FD and 0x3F5: UI frames, no additional safety checks needed
+  }
+
   if (violation) {
     tx = false;
   }
@@ -372,12 +399,36 @@ static safety_config tesla_init(uint16_t param) {
     {0x488, 0, 4, .check_relay = true, .disable_static_blocking = true},   // DAS_steeringControl
     {0x2b9, 0, 8, .check_relay = false},                                   // DAS_control (for cancel)
     {0x27D, 0, 3, .check_relay = true, .disable_static_blocking = true},   // APS_eacMonitor
+    {0x082, 0, 8, .check_relay = false, .disable_static_blocking = true},  // UI_tripPlanning (precondition)
   };
 
   static const CanMsg TESLA_M3_Y_LONG_TX_MSGS[] = {
     {0x488, 0, 4, .check_relay = true, .disable_static_blocking = true},  // DAS_steeringControl
     {0x2b9, 0, 8, .check_relay = true, .disable_static_blocking = true},  // DAS_control
     {0x27D, 0, 3, .check_relay = true, .disable_static_blocking = true},  // APS_eacMonitor
+    {0x082, 0, 8, .check_relay = false, .disable_static_blocking = true}, // UI_tripPlanning (precondition)
+  };
+
+  static const CanMsg TESLA_M3_Y_TX_MSGS_FSD_MOD[] = {
+    {0x488, 0, 4, .check_relay = true, .disable_static_blocking = true},   // DAS_steeringControl
+    {0x2b9, 0, 8, .check_relay = false},                                   // DAS_control (for cancel)
+    {0x27D, 0, 3, .check_relay = true, .disable_static_blocking = true},   // APS_eacMonitor
+    {0x3FD, 0, 8, .check_relay = false, .disable_static_blocking = true},  // UI_autopilotControl (FSD unlock)
+    {0x370, 0, 8, .check_relay = false, .disable_static_blocking = true},  // EPAS3S_sysStatus (nag killer echo)
+    {0x399, 0, 8, .check_relay = false, .disable_static_blocking = true},  // ISA speed chime suppression
+    {0x082, 0, 8, .check_relay = false, .disable_static_blocking = true},  // UI_tripPlanning (precondition)
+    {0x3F5, 0, 8, .check_relay = false, .disable_static_blocking = true},  // VCFRONT_lighting (extras)
+  };
+
+  static const CanMsg TESLA_M3_Y_LONG_TX_MSGS_FSD_MOD[] = {
+    {0x488, 0, 4, .check_relay = true, .disable_static_blocking = true},   // DAS_steeringControl
+    {0x2b9, 0, 8, .check_relay = true, .disable_static_blocking = true},   // DAS_control
+    {0x27D, 0, 3, .check_relay = true, .disable_static_blocking = true},   // APS_eacMonitor
+    {0x3FD, 0, 8, .check_relay = false, .disable_static_blocking = true},  // UI_autopilotControl (FSD unlock)
+    {0x370, 0, 8, .check_relay = false, .disable_static_blocking = true},  // EPAS3S_sysStatus (nag killer echo)
+    {0x399, 0, 8, .check_relay = false, .disable_static_blocking = true},  // ISA speed chime suppression
+    {0x082, 0, 8, .check_relay = false, .disable_static_blocking = true},  // UI_tripPlanning (precondition)
+    {0x3F5, 0, 8, .check_relay = false, .disable_static_blocking = true},  // VCFRONT_lighting (extras)
   };
 
   const uint16_t TESLA_FLAG_FSD_14 = 2;
@@ -392,6 +443,7 @@ static safety_config tesla_init(uint16_t param) {
   const uint16_t TESLA_PARAM_SP_MADS_SCREEN_BUTTON_3_FINGER = 2;
   const uint16_t TESLA_PARAM_SP_MADS_SCREEN_BUTTON_4_FINGER = 4;
   const uint16_t TESLA_PARAM_SP_MADS_SCREEN_BUTTON_5_FINGER = 8;
+  const uint16_t TESLA_PARAM_SP_FSD_MOD = 16;
 
   tesla_has_vehicle_bus = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_VEHICLE_BUS);
 
@@ -404,6 +456,8 @@ static safety_config tesla_init(uint16_t param) {
   } else {
     tesla_mads_screen_button_fingers = 0U;
   }
+
+  tesla_fsd_mod = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_FSD_MOD);
 
   tesla_stock_aeb = false;
   tesla_stock_steering_control = false;
@@ -423,10 +477,18 @@ static safety_config tesla_init(uint16_t param) {
   };
 
   safety_config ret;
-  if (tesla_longitudinal) {
-    SET_TX_MSGS(TESLA_M3_Y_LONG_TX_MSGS, ret);
+  if (tesla_fsd_mod) {
+    if (tesla_longitudinal) {
+      SET_TX_MSGS(TESLA_M3_Y_LONG_TX_MSGS_FSD_MOD, ret);
+    } else {
+      SET_TX_MSGS(TESLA_M3_Y_TX_MSGS_FSD_MOD, ret);
+    }
   } else {
-    SET_TX_MSGS(TESLA_M3_Y_TX_MSGS, ret);
+    if (tesla_longitudinal) {
+      SET_TX_MSGS(TESLA_M3_Y_LONG_TX_MSGS, ret);
+    } else {
+      SET_TX_MSGS(TESLA_M3_Y_TX_MSGS, ret);
+    }
   }
 
   if (tesla_has_vehicle_bus) {
