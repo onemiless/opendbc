@@ -417,6 +417,7 @@ static safety_config tesla_init(uint16_t param) {
     {0x370, 0, 8, .check_relay = false, .disable_static_blocking = true},  // EPAS3S_sysStatus (nag killer echo)
     {0x399, 0, 8, .check_relay = false, .disable_static_blocking = true},  // ISA speed chime suppression
     {0x082, 0, 8, .check_relay = false, .disable_static_blocking = true},  // UI_tripPlanning (precondition)
+    {0x249, 0, 3, .check_relay = false, .disable_static_blocking = true},  // SCCM_leftStalk (turn signal)
     {0x3F5, 0, 8, .check_relay = false, .disable_static_blocking = true},  // VCFRONT_lighting (extras)
   };
 
@@ -428,6 +429,7 @@ static safety_config tesla_init(uint16_t param) {
     {0x370, 0, 8, .check_relay = false, .disable_static_blocking = true},  // EPAS3S_sysStatus (nag killer echo)
     {0x399, 0, 8, .check_relay = false, .disable_static_blocking = true},  // ISA speed chime suppression
     {0x082, 0, 8, .check_relay = false, .disable_static_blocking = true},  // UI_tripPlanning (precondition)
+    {0x249, 0, 3, .check_relay = false, .disable_static_blocking = true},  // SCCM_leftStalk (turn signal)
     {0x3F5, 0, 8, .check_relay = false, .disable_static_blocking = true},  // VCFRONT_lighting (extras)
   };
 
