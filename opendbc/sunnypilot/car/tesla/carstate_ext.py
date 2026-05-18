@@ -21,6 +21,8 @@ class CarStateExt:
     self.CP_SP = CP_SP
 
     self.active_touch_points = 0
+    self.tesla_stock_longitudinal_active = False
+    self.prev_touch_points_for_long = 0
 
   def update(self, ret: structs.CarState, ret_sp: structs.CarStateSP, can_parsers: dict[StrEnum, CANParser]) -> None:
     if self.CP_SP.flags & TeslaFlagsSP.HAS_VEHICLE_BUS:
@@ -40,6 +42,15 @@ class CarStateExt:
       if finger_count is not None:
         ret.buttonEvents = [*create_button_events(self.active_touch_points, prev_active_touch_points,
                                                   {finger_count: ButtonType.lkas})]
+
+      # 4-finger touch toggles stock longitudinal control
+      prev_touch_long = self.prev_touch_points_for_long
+      self.prev_touch_points_for_long = self.active_touch_points
+      if prev_touch_long != 4 and self.active_touch_points == 4:
+        self.tesla_stock_longitudinal_active = not self.tesla_stock_longitudinal_active
+
+    if self.tesla_stock_longitudinal_active:
+      ret_sp.flags |= TeslaFlagsSP.STOCK_LONGITUDINAL_ACTIVE.value
     cp_party = can_parsers[Bus.party]
 
     cp_ap_party = can_parsers[Bus.ap_party]

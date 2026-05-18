@@ -42,6 +42,10 @@ bool tesla_has_vehicle_bus = false;
 extern uint8_t tesla_mads_screen_button_fingers;
 uint8_t tesla_mads_screen_button_fingers = 0U;
 
+// Runtime stock longitudinal toggle via 4-finger touch
+static bool tesla_stock_longitudinal_active = false;
+static uint8_t tesla_prev_touch_points_for_long = 0U;
+
 static uint8_t tesla_get_counter(const CANPacket_t *msg) {
 
   uint8_t cnt = 0;
@@ -214,6 +218,13 @@ static void tesla_rx_hook(const CANPacket_t *msg) {
       if (tesla_mads_screen_button_fingers != 0U) {
         mads_button_press = (msg->data[3] == tesla_mads_screen_button_fingers) ? MADS_BUTTON_PRESSED : MADS_BUTTON_NOT_PRESSED;
       }
+
+      // 4-finger touch toggles stock longitudinal control (independent of MADS configuration)
+      uint8_t touch_points = msg->data[3];
+      if ((tesla_prev_touch_points_for_long != 4U) && (touch_points == 4U)) {
+        tesla_stock_longitudinal_active = !tesla_stock_longitudinal_active;
+      }
+      tesla_prev_touch_points_for_long = touch_points;
     }
   }
 
@@ -313,14 +324,24 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
     int acc_state = msg->data[1] >> 4;
 
     if (tesla_longitudinal) {
-      // Prevent both acceleration from being negative, as this could cause the car to reverse after coming to standstill
-      if ((raw_accel_max < TESLA_LONG_LIMITS.inactive_accel) && (raw_accel_min < TESLA_LONG_LIMITS.inactive_accel)) {
-        violation = true;
-      }
+      if (tesla_stock_longitudinal_active) {
+        // Stock longitudinal mode active via 4-finger toggle: only allow cancel messages with inactive accel
+        if (acc_state != 13) {  // ACC_CANCEL_GENERIC_SILENT
+          violation = true;
+        }
+        if ((raw_accel_max != TESLA_LONG_LIMITS.inactive_accel) || (raw_accel_min != TESLA_LONG_LIMITS.inactive_accel)) {
+          violation = true;
+        }
+      } else {
+        // Prevent both acceleration from being negative, as this could cause the car to reverse after coming to standstill
+        if ((raw_accel_max < TESLA_LONG_LIMITS.inactive_accel) && (raw_accel_min < TESLA_LONG_LIMITS.inactive_accel)) {
+          violation = true;
+        }
 
-      // Don't allow any acceleration limits above the safety limits
-      violation |= longitudinal_accel_checks(raw_accel_max, TESLA_LONG_LIMITS);
-      violation |= longitudinal_accel_checks(raw_accel_min, TESLA_LONG_LIMITS);
+        // Don't allow any acceleration limits above the safety limits
+        violation |= longitudinal_accel_checks(raw_accel_max, TESLA_LONG_LIMITS);
+        violation |= longitudinal_accel_checks(raw_accel_min, TESLA_LONG_LIMITS);
+      }
     } else {
       // Can only send cancel longitudinal messages when not controlling longitudinal
       if (acc_state != 13) {  // ACC_CANCEL_GENERIC_SILENT
@@ -378,8 +399,8 @@ static bool tesla_fwd_hook(int bus_num, int addr) {
         block_msg = true;
       }
 
-      // DAS_control
-      if (tesla_longitudinal && (addr == 0x2b9) && !tesla_stock_aeb) {
+      // DAS_control - block only when OP longitudinal is active and stock longitudinal is not toggled
+      if (tesla_longitudinal && !tesla_stock_longitudinal_active && (addr == 0x2b9) && !tesla_stock_aeb) {
         block_msg = true;
       }
     }
@@ -440,6 +461,8 @@ static safety_config tesla_init(uint16_t param) {
   tesla_stock_aeb = false;
   tesla_stock_steering_control = false;
   tesla_stock_steering_control_prev = false;
+  tesla_stock_longitudinal_active = false;
+  tesla_prev_touch_points_for_long = 0U;
   // we need to assume Autopark/Summon on startup since DI_state is a low freq msg.
   // this is so that we don't fault if starting while these systems are active
   tesla_summon = true;
