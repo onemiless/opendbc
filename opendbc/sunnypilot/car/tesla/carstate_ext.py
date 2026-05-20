@@ -34,8 +34,6 @@ class CarStateExt:
       finger_count = None
       if self.CP_SP.flags & TeslaFlagsSP.MADS_SCREEN_BUTTON_3_FINGER:
         finger_count = 3
-      elif self.CP_SP.flags & TeslaFlagsSP.MADS_SCREEN_BUTTON_4_FINGER:
-        finger_count = 4
       elif self.CP_SP.flags & TeslaFlagsSP.MADS_SCREEN_BUTTON_5_FINGER:
         finger_count = 5
 
@@ -43,7 +41,7 @@ class CarStateExt:
         ret.buttonEvents = [*create_button_events(self.active_touch_points, prev_active_touch_points,
                                                   {finger_count: ButtonType.lkas})]
 
-      # 4-finger touch toggles stock longitudinal control
+      # 4-finger touch toggles stock longitudinal — pure memory toggle, zero I/O
       prev_touch_long = self.prev_touch_points_for_long
       self.prev_touch_points_for_long = self.active_touch_points
       if prev_touch_long != 4 and self.active_touch_points == 4:

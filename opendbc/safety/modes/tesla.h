@@ -324,24 +324,14 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
     int acc_state = msg->data[1] >> 4;
 
     if (tesla_longitudinal) {
-      if (tesla_stock_longitudinal_active) {
-        // Stock longitudinal mode active via 4-finger toggle: only allow cancel messages with inactive accel
-        if (acc_state != 13) {  // ACC_CANCEL_GENERIC_SILENT
-          violation = true;
-        }
-        if ((raw_accel_max != TESLA_LONG_LIMITS.inactive_accel) || (raw_accel_min != TESLA_LONG_LIMITS.inactive_accel)) {
-          violation = true;
-        }
-      } else {
-        // Prevent both acceleration from being negative, as this could cause the car to reverse after coming to standstill
-        if ((raw_accel_max < TESLA_LONG_LIMITS.inactive_accel) && (raw_accel_min < TESLA_LONG_LIMITS.inactive_accel)) {
-          violation = true;
-        }
-
-        // Don't allow any acceleration limits above the safety limits
-        violation |= longitudinal_accel_checks(raw_accel_max, TESLA_LONG_LIMITS);
-        violation |= longitudinal_accel_checks(raw_accel_min, TESLA_LONG_LIMITS);
+      // Prevent both acceleration from being negative, as this could cause the car to reverse after coming to standstill
+      if ((raw_accel_max < TESLA_LONG_LIMITS.inactive_accel) && (raw_accel_min < TESLA_LONG_LIMITS.inactive_accel)) {
+        violation = true;
       }
+
+      // Don't allow any acceleration limits above the safety limits
+      violation |= longitudinal_accel_checks(raw_accel_max, TESLA_LONG_LIMITS);
+      violation |= longitudinal_accel_checks(raw_accel_min, TESLA_LONG_LIMITS);
     } else {
       // Can only send cancel longitudinal messages when not controlling longitudinal
       if (acc_state != 13) {  // ACC_CANCEL_GENERIC_SILENT

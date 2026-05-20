@@ -46,10 +46,16 @@ class CarController(CarControllerBase):
       can_sends.append(self.tesla_can.create_steering_allowed())
 
     # Longitudinal control
-    if self.CP.openpilotLongitudinalControl and not CS.tesla_stock_longitudinal_active:
+    if self.CP.openpilotLongitudinalControl:
       if self.frame % 4 == 0:
-        state = 13 if CC.cruiseControl.cancel else 4  # 4=ACC_ON, 13=ACC_CANCEL_GENERIC_SILENT
-        accel = float(np.clip(actuators.accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
+        if CS.tesla_stock_longitudinal_active:
+          # Stock longitudinal mode: send neutral commands so safety model is satisfied,
+          # letting stock ACC (if firmware updated) or driver pedal control the speed
+          state = 13 if CC.cruiseControl.cancel else 4
+          accel = 0.0
+        else:
+          state = 13 if CC.cruiseControl.cancel else 4  # 4=ACC_ON, 13=ACC_CANCEL_GENERIC_SILENT
+          accel = float(np.clip(actuators.accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
         cntr = (self.frame // 4) % 8
         can_sends.append(self.tesla_can.create_longitudinal_command(state, accel, cntr, CS.out.vEgo, CC.longActive, CS.cruise_override))
 
