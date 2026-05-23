@@ -4,7 +4,7 @@ from opendbc.car import Bus
 from opendbc.car.lateral import apply_steer_angle_limits_vm
 from opendbc.car.interfaces import CarControllerBase
 from opendbc.car.tesla.teslacan import TeslaCAN
-from opendbc.car.tesla.values import CarControllerParams
+from opendbc.car.tesla.values import CANBUS, CarControllerParams
 from opendbc.car.vehicle_model import VehicleModel
 from opendbc.sunnypilot.car.tesla.coop_steering import CoopSteeringCarController
 
@@ -48,7 +48,23 @@ class CarController(CarControllerBase):
     # Longitudinal control
     if self.CP.openpilotLongitudinalControl:
       if self.frame % 4 == 0:
-        if not CS.tesla_stock_longitudinal_active:
+        if CS.tesla_stock_longitudinal_active and CS.das_control is not None:
+          # Echo Tesla's DAS_control values so stock ACC controls speed while
+          # openpilot maintains the DAS_control heartbeat the car expects.
+          # Use Tesla's actual parsed values (accel, jerk, setSpeed) directly.
+          das = CS.das_control
+          values = {
+            "DAS_setSpeed": das["DAS_setSpeed"],
+            "DAS_accState": das["DAS_accState"],
+            "DAS_aebEvent": 0,  # Never echo AEB events
+            "DAS_jerkMin": das["DAS_jerkMin"],
+            "DAS_jerkMax": das["DAS_jerkMax"],
+            "DAS_accelMin": das["DAS_accelMin"],
+            "DAS_accelMax": das["DAS_accelMax"],
+            "DAS_controlCounter": (self.frame // 4) % 8,
+          }
+          can_sends.append(self.packer.make_can_msg("DAS_control", CANBUS.party, values))
+        else:
           state = 13 if CC.cruiseControl.cancel else 4  # 4=ACC_ON, 13=ACC_CANCEL_GENERIC_SILENT
           accel = float(np.clip(actuators.accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
           cntr = (self.frame // 4) % 8
