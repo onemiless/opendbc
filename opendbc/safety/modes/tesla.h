@@ -324,6 +324,12 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
     int acc_state = msg->data[1] >> 4;
 
     if (tesla_longitudinal) {
+      // When stock longitudinal is active, block openpilot's DAS_control so
+      // the stock ACC's DAS_control (allowed through by the fwd hook) takes over
+      if (tesla_stock_longitudinal_active) {
+        violation = true;
+      }
+
       // Prevent both acceleration from being negative, as this could cause the car to reverse after coming to standstill
       if ((raw_accel_max < TESLA_LONG_LIMITS.inactive_accel) && (raw_accel_min < TESLA_LONG_LIMITS.inactive_accel)) {
         violation = true;
