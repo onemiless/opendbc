@@ -26,8 +26,6 @@ class CarController(CarControllerBase):
 
     # Vehicle model used for lateral limiting
     self.VM = VehicleModel(get_safety_CP())
-    self.stock_cancel_counter = 0
-    self.stock_was_active_prev = False
 
   def update(self, CC, CC_SP, CS, now_nanos):
     actuators = CC.actuators
@@ -54,28 +52,10 @@ class CarController(CarControllerBase):
           # Echo Tesla's DAS_control values so stock ACC controls speed while
           # openpilot maintains the DAS_control heartbeat the car expects.
           das = CS.das_control
-          acc_state = das["DAS_accState"]
-
-          # Reset counter when just entering stock mode
-          if not self.stock_was_active_prev:
-            self.stock_cancel_counter = 0
-          self.stock_was_active_prev = True
-
-          # When DAS sends CANCEL (brake, low-speed), echo keeps it in CANCEL
-          # which prevents re-engagement.  After a short delay (~200ms) with
-          # cruise available and brake released, force ACC_ON so the stalk
-          # can re-engage naturally.
-          if acc_state == 13 and CS.cruiseState.available and not CS.brakePressed:
-            self.stock_cancel_counter += 1
-          else:
-            self.stock_cancel_counter = 0
-
-          if self.stock_cancel_counter > 5:   # ~200 ms at 25 Hz
-            acc_state = 4
 
           values = {
             "DAS_setSpeed": das["DAS_setSpeed"],
-            "DAS_accState": acc_state,
+            "DAS_accState": das["DAS_accState"],
             "DAS_aebEvent": 0,  # Never echo AEB events
             "DAS_jerkMin": das["DAS_jerkMin"],
             "DAS_jerkMax": das["DAS_jerkMax"],
@@ -85,7 +65,6 @@ class CarController(CarControllerBase):
           }
           can_sends.append(self.packer.make_can_msg("DAS_control", CANBUS.party, values))
         else:
-          self.stock_was_active_prev = False
           state = 13 if CC.cruiseControl.cancel else 4  # 4=ACC_ON, 13=ACC_CANCEL_GENERIC_SILENT
           accel = float(np.clip(actuators.accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
           cntr = (self.frame // 4) % 8
