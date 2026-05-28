@@ -54,11 +54,15 @@ class CarController(CarControllerBase):
         if not CS.tesla_stock_longitudinal_active:
           # SP longitudinal mode: send OP's own DAS_control
           leaving_stock = not CS.tesla_stock_longitudinal_active and self.prev_stock_longitudinal
-          if leaving_stock and CS.cruiseState.enabled:
-            state = 4  # ACC_ON: preserve active cruise during transition
+          if leaving_stock:
+            # On first frame after returning from stock mode, send neutral
+            # (ACC_ON + zero accel) to let the longitudinal planner re-sync
+            # with actual vehicle state before taking over.
+            state = 4
+            accel = 0.0
           else:
             state = 13 if CC.cruiseControl.cancel else 4
-          accel = float(np.clip(actuators.accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
+            accel = float(np.clip(actuators.accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
           cntr = (self.frame // 4) % 8
           can_sends.append(self.tesla_can.create_longitudinal_command(state, accel, cntr, CS.out.vEgo, CC.longActive, CS.cruise_override))
         # Stock longitudinal mode: send nothing — Tesla's own DAS_control
