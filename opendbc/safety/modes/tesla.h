@@ -324,14 +324,19 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
     int acc_state = msg->data[1] >> 4;
 
     if (tesla_longitudinal) {
-      // Prevent both acceleration from being negative, as this could cause the car to reverse after coming to standstill
-      if ((raw_accel_max < TESLA_LONG_LIMITS.inactive_accel) && (raw_accel_min < TESLA_LONG_LIMITS.inactive_accel)) {
-        violation = true;
-      }
+      // When stock longitudinal is active, openpilot echoes Tesla's own
+      // DAS_control values.  These are inherently safe — skip the accel
+      // limit checks so hard stock-ACC braking does not get blocked.
+      if (!tesla_stock_longitudinal_active) {
+        // Prevent both acceleration from being negative, as this could cause the car to reverse after coming to standstill
+        if ((raw_accel_max < TESLA_LONG_LIMITS.inactive_accel) && (raw_accel_min < TESLA_LONG_LIMITS.inactive_accel)) {
+          violation = true;
+        }
 
-      // Don't allow any acceleration limits above the safety limits
-      violation |= longitudinal_accel_checks(raw_accel_max, TESLA_LONG_LIMITS);
-      violation |= longitudinal_accel_checks(raw_accel_min, TESLA_LONG_LIMITS);
+        // Don't allow any acceleration limits above the safety limits
+        violation |= longitudinal_accel_checks(raw_accel_max, TESLA_LONG_LIMITS);
+        violation |= longitudinal_accel_checks(raw_accel_min, TESLA_LONG_LIMITS);
+      }
     } else {
       // Can only send cancel longitudinal messages when not controlling longitudinal
       if (acc_state != 13) {  // ACC_CANCEL_GENERIC_SILENT

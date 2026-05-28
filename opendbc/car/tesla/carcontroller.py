@@ -27,7 +27,6 @@ class CarController(CarControllerBase):
 
     # Avoid echoing stale CANCEL (DAS_accState=13) on first entry into stock longitudinal mode
     self.prev_stock_longitudinal = False
-    self.stock_cancel_counter = 0
     # Vehicle model used for lateral limiting
     self.VM = VehicleModel(get_safety_CP())
 
@@ -65,16 +64,6 @@ class CarController(CarControllerBase):
           if entering_stock and acc_state == 13:
             acc_state = 4  # ACC_ON
 
-          # Re-engagement after brake/low-speed CANCEL: when DAS stays in
-          # CANCEL (13) while cruise is available and brake is released,
-          # force ACC_ON after a brief delay so the stalk can re-engage.
-          if not entering_stock and acc_state == 13 and CS.cruiseState.available and not CS.brakePressed:
-            self.stock_cancel_counter += 1
-          else:
-            self.stock_cancel_counter = 0
-
-          if self.stock_cancel_counter > 3:   # ~120 ms at 25 Hz
-            acc_state = 4
 
           values = {
             "DAS_setSpeed": das["DAS_setSpeed"],
@@ -89,7 +78,14 @@ class CarController(CarControllerBase):
           can_sends.append(self.packer.make_can_msg("DAS_control", CANBUS.party, values))
 
         else:
-          state = 13 if CC.cruiseControl.cancel else 4  # 4=ACC_ON, 13=ACC_CANCEL_GENERIC_SILENT
+          # When leaving stock longitudinal back to OP longitudinal, avoid
+          # sending CANCEL even if the state machine is disabled — the car's
+          # ACC is already active and we want a seamless takeover.
+          leaving_stock = not CS.tesla_stock_longitudinal_active and self.prev_stock_longitudinal
+          if leaving_stock and CS.cruiseState.enabled:
+            state = 4  # ACC_ON: preserve active cruise during transition
+          else:
+            state = 13 if CC.cruiseControl.cancel else 4  # 4=ACC_ON, 13=ACC_CANCEL_GENERIC_SILENT
           accel = float(np.clip(actuators.accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
           cntr = (self.frame // 4) % 8
           can_sends.append(self.tesla_can.create_longitudinal_command(state, accel, cntr, CS.out.vEgo, CC.longActive, CS.cruise_override))
