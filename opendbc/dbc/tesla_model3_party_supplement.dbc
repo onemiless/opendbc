@@ -1,0 +1,21 @@
+VERSION ""
+
+NS_ : NS_DESC_ CM_ BA_DEF_ BA_ VAL_ BA_DEF_DEF_
+
+BS_:
+
+BU_: DI BMS ESP DAS SCCM GTW
+
+BO_ 921 DAS_trafficLight: 8 DAS
+ SG_ TL_phaseId : 0|4@1+ (1,0) [0|15] "" DAS
+ SG_ TL_laneDir : 4|2@1+ (1,0) [0|3] "" DAS
+ SG_ TL_statusFlags : 6|2@1+ (1,0) [0|3] "" DAS
+ SG_ TL_countdown : 8|5@1+ (1,0) [0|31] "s" DAS
+ SG_ TL_dataValid : 24|1@1+ (1,0) [0|1] "" DAS
+ SG_ TL_lightState : 42|4@1+ (1,0) [0|15] "" DAS
+
+VAL_ 921 TL_lightState 0 "Unknown" 1 "Red" 2 "Yellow" 3 "Yellow" 4 "Flashing" 7 "Green" ;
+
+BO_ 925 DAS_stopLine: 8 DAS
+ SG_ SL_distStatus : 16|2@1+ (1,0) [0|3] "" DAS
+ SG_ SL_distance : 21|12@1+ (0.1,0) [0|409.5] "m" DAS
