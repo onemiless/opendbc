@@ -6,6 +6,12 @@ BS_:
 
 BU_: DI BMS ESP DAS SCCM GTW
 
+BO_ 297 DI_buttons: 8 DI
+ SG_ LeftWheelRoll : 8|8@1+ (1,0) [0|255] "steps" DI
+ SG_ RightWheelRoll : 16|8@1+ (1,0) [0|255] "steps" DI
+ SG_ LeftWheelClick : 24|1@1+ (1,0) [0|1] "" DI
+ SG_ RightWheelClick : 25|1@1+ (1,0) [0|1] "" DI
+
 BO_ 921 DAS_trafficLight: 8 DAS
  SG_ TL_phaseId : 0|4@1+ (1,0) [0|15] "" DAS
  SG_ TL_laneDir : 4|2@1+ (1,0) [0|3] "" DAS
