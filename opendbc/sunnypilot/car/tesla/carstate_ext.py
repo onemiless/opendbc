@@ -24,24 +24,7 @@ class CarStateExt:
     self.tesla_stock_longitudinal_active = False
     self.prev_touch_points_for_long = 0
 
-    self._dyn_enabled = False
-    self._dyn_speed_high = 80
-    self._dyn_speed_low = 70
-    self._dyn_manual_override = False
-    self._frame = 0
-
-  def _read_dyn_params(self):
-    from openpilot.common.params import Params
-    p = Params()
-    self._dyn_enabled = p.get_bool("DynamicAutoStock")
-    self._dyn_speed_high = p.get_int("DynamicAutoStockSpeedKph", default=80)
-    self._dyn_speed_low = p.get_int("DynamicAutoStockSpeedLowKph", default=70)
-
   def update(self, ret: structs.CarState, ret_sp: structs.CarStateSP, can_parsers: dict[StrEnum, CANParser]) -> None:
-    self._frame += 1
-    if self._frame % 100 == 0:
-      self._read_dyn_params()
-
     if self.CP_SP.flags & TeslaFlagsSP.HAS_VEHICLE_BUS:
       cp_adas = can_parsers[Bus.adas]
 
@@ -63,21 +46,13 @@ class CarStateExt:
       self.prev_touch_points_for_long = self.active_touch_points
       if prev_touch_long != 4 and self.active_touch_points == 4:
         self.tesla_stock_longitudinal_active = not self.tesla_stock_longitudinal_active
-        self._dyn_manual_override = True
 
-    # Dynamic auto-stock based on speed
+    # Dynamic auto-stock: speed > 80 km/h → stock ACC, speed < 70 km/h → SP
     speed_kph = ret.vEgo * CV.MS_TO_KPH
-    if self._dyn_enabled and not self._dyn_manual_override:
-      if speed_kph > self._dyn_speed_high:
-        self.tesla_stock_longitudinal_active = True
-      elif speed_kph < self._dyn_speed_low:
-        self.tesla_stock_longitudinal_active = False
-    # Reset manual override when speed crosses opposite boundary
-    if self._dyn_manual_override:
-      if self.tesla_stock_longitudinal_active and speed_kph < self._dyn_speed_low:
-        self._dyn_manual_override = False
-      elif not self.tesla_stock_longitudinal_active and speed_kph > self._dyn_speed_high:
-        self._dyn_manual_override = False
+    if speed_kph > 80:
+      self.tesla_stock_longitudinal_active = True
+    elif speed_kph < 70:
+      self.tesla_stock_longitudinal_active = False
 
     if self.tesla_stock_longitudinal_active:
       ret_sp.flags |= TeslaFlagsSP.STOCK_LONGITUDINAL_ACTIVE.value
