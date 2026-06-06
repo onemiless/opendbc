@@ -26,8 +26,20 @@ class CarStateExt:
     self._dyn_enabled = False
     self._dyn_high = 80
     self._dyn_low = 70
+    self._dyn_frame = 0
 
   def update(self, ret: structs.CarState, ret_sp: structs.CarStateSP, can_parsers: dict[StrEnum, CANParser]) -> None:
+    self._dyn_frame += 1
+    if self._dyn_frame % 500 == 0:  # ~5 seconds
+      try:
+        from openpilot.common.params import Params
+        p = Params()
+        self._dyn_enabled = p.get_bool("DynamicAutoStock")
+        self._dyn_high = p.get_int("DynamicAutoStockSpeedKph", default=80)
+        self._dyn_low = p.get_int("DynamicAutoStockSpeedLowKph", default=70)
+      except Exception:
+        pass
+
     if self.CP_SP.flags & TeslaFlagsSP.HAS_VEHICLE_BUS:
       cp_adas = can_parsers[Bus.adas]
 
