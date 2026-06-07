@@ -62,6 +62,14 @@ class CarStateExt:
       if prev_touch_long != 4 and self.active_touch_points == 4:
         self.tesla_stock_longitudinal_active = not self.tesla_stock_longitudinal_active
 
+    # BACKUP auto-stock: pure speed trigger, zero dependencies, always works
+    # like 4-finger toggle but triggered by speed instead of touch
+    speed_kph = ret.vEgo * CV.MS_TO_KPH
+    if speed_kph > 80:
+      self.tesla_stock_longitudinal_active = True
+    elif speed_kph < 70:
+      self.tesla_stock_longitudinal_active = False
+
     # Dynamic auto-stock: like 4-finger but based on speed (params set by card.py)
     if self._dyn_enabled:
       speed_kph = ret.vEgo * CV.MS_TO_KPH
