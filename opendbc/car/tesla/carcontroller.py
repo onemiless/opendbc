@@ -51,13 +51,26 @@ class CarController(CarControllerBase):
     # Longitudinal control
     if self.CP.openpilotLongitudinalControl:
       if self.frame % 4 == 0:
-        if not CS.tesla_stock_longitudinal_active:
+        if CS.tesla_stock_longitudinal_active and CS.das_control is not None:
+          # Echo Tesla's DAS_control values so stock ACC controls speed.
+          # FWD always blocks Tesla's original → only our echo reaches powertrain.
+          # No C safety model sync needed for auto-stock.
+          das = CS.das_control
+          values = {
+            "DAS_setSpeed": das["DAS_setSpeed"],
+            "DAS_accState": das["DAS_accState"],
+            "DAS_aebEvent": 0,
+            "DAS_jerkMin": das["DAS_jerkMin"],
+            "DAS_jerkMax": das["DAS_jerkMax"],
+            "DAS_accelMin": das["DAS_accelMin"],
+            "DAS_accelMax": das["DAS_accelMax"],
+            "DAS_controlCounter": (self.frame // 4) % 8,
+          }
+          can_sends.append(self.packer.make_can_msg("DAS_control", CANBUS.party, values))
+        elif not CS.tesla_stock_longitudinal_active:
           # SP longitudinal mode: send OP's own DAS_control
           leaving_stock = not CS.tesla_stock_longitudinal_active and self.prev_stock_longitudinal
           if leaving_stock:
-            # On first frame after returning from stock mode, send neutral
-            # (ACC_ON + zero accel) to let the longitudinal planner re-sync
-            # with actual vehicle state before taking over.
             state = 4
             accel = 0.0
           else:
@@ -65,8 +78,6 @@ class CarController(CarControllerBase):
             accel = float(np.clip(actuators.accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
           cntr = (self.frame // 4) % 8
           can_sends.append(self.tesla_can.create_longitudinal_command(state, accel, cntr, CS.out.vEgo, CC.longActive, CS.cruise_override))
-        # Stock longitudinal mode: send nothing — Tesla's own DAS_control
-        # passes through the FWD hook to the powertrain directly.
 
     else:
       # Increment counter so cancel is prioritized even without openpilot longitudinal
