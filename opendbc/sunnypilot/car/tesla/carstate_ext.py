@@ -23,25 +23,8 @@ class CarStateExt:
     self.active_touch_points = 0
     self.tesla_stock_longitudinal_active = False
     self.prev_touch_points_for_long = 0
-    self._dyn_enabled = False
-    self._dyn_backup_enabled = False
-    self._dyn_high = 80
-    self._dyn_low = 70
-    self._dyn_frame = 0
 
   def update(self, ret: structs.CarState, ret_sp: structs.CarStateSP, can_parsers: dict[StrEnum, CANParser]) -> None:
-    self._dyn_frame += 1
-    if self._dyn_frame % 500 == 0:  # ~5 seconds
-      try:
-        from openpilot.common.params import Params
-        p = Params()
-        self._dyn_enabled = p.get_bool("DynamicAutoStock")
-        self._dyn_backup_enabled = p.get_bool("DynamicAutoStockBackup")
-        self._dyn_high = p.get_int("DynamicAutoStockSpeedKph", default=80)
-        self._dyn_low = p.get_int("DynamicAutoStockSpeedLowKph", default=70)
-      except Exception:
-        pass
-
     if self.CP_SP.flags & TeslaFlagsSP.HAS_VEHICLE_BUS:
       cp_adas = can_parsers[Bus.adas]
 
@@ -64,21 +47,12 @@ class CarStateExt:
       if prev_touch_long != 4 and self.active_touch_points == 4:
         self.tesla_stock_longitudinal_active = not self.tesla_stock_longitudinal_active
 
-    # BACKUP auto-stock: same speed logic as main, separate toggle, minimal deps
-    if self._dyn_backup_enabled:
-      speed_kph = ret.vEgo * CV.MS_TO_KPH
-      if speed_kph > self._dyn_high:
-        self.tesla_stock_longitudinal_active = True
-      elif speed_kph < self._dyn_low:
-        self.tesla_stock_longitudinal_active = False
-
-    # MAIN auto-stock: speed + decel check, separate toggle
-    if self._dyn_enabled:
-      speed_kph = ret.vEgo * CV.MS_TO_KPH
-      if speed_kph > self._dyn_high and ret.aEgo >= -0.3:
-        self.tesla_stock_longitudinal_active = True
-      elif speed_kph < self._dyn_low:
-        self.tesla_stock_longitudinal_active = False
+    # Auto-stock: speed > 80km/h → stock ACC, speed < 70km/h → SP
+    speed_kph = ret.vEgo * CV.MS_TO_KPH
+    if speed_kph > 80:
+      self.tesla_stock_longitudinal_active = True
+    elif speed_kph < 70:
+      self.tesla_stock_longitudinal_active = False
 
     if self.tesla_stock_longitudinal_active:
       ret_sp.flags |= TeslaFlagsSP.STOCK_LONGITUDINAL_ACTIVE.value
