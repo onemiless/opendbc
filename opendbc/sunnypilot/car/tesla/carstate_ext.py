@@ -23,11 +23,24 @@ class CarStateExt:
     self.active_touch_points = 0
     self.tesla_stock_longitudinal_active = False
     self.prev_touch_points_for_long = 0
-    self._dyn_enabled = True
+    self._dyn_enabled = False
     self._dyn_high = 80
     self._dyn_low = 70
+    self._dyn_frame = 0
+    self._manual_override = False
 
   def update(self, ret: structs.CarState, ret_sp: structs.CarStateSP, can_parsers: dict[StrEnum, CANParser]) -> None:
+    self._dyn_frame += 1
+    if self._dyn_frame % 500 == 0:  # ~5 seconds
+      try:
+        from openpilot.common.params import Params
+        p = Params()
+        self._dyn_enabled = p.get_bool("DynamicAutoStock")
+        self._dyn_high = p.get_int("DynamicAutoStockSpeedKph", default=80)
+        self._dyn_low = p.get_int("DynamicAutoStockSpeedLowKph", default=70)
+      except Exception:
+        pass
+
     if self.CP_SP.flags & TeslaFlagsSP.HAS_VEHICLE_BUS:
       cp_adas = can_parsers[Bus.adas]
 
@@ -49,10 +62,14 @@ class CarStateExt:
       self.prev_touch_points_for_long = self.active_touch_points
       if prev_touch_long != 4 and self.active_touch_points == 4:
         self.tesla_stock_longitudinal_active = not self.tesla_stock_longitudinal_active
+        self._manual_override = True
 
-    # Auto-stock: speed-based toggle (params set by card.py for safety)
-    if self._dyn_enabled:
-      speed_kph = ret.vEgo * CV.MS_TO_KPH
+    # Auto-stock: speed-based toggle (won't override manual 4-finger)
+    speed_kph = ret.vEgo * CV.MS_TO_KPH
+    if self._manual_override:
+      if speed_kph < self._dyn_low:
+        self._manual_override = False
+    elif self._dyn_enabled:
       if speed_kph > self._dyn_high:
         self.tesla_stock_longitudinal_active = True
       elif speed_kph < self._dyn_low:
