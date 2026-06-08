@@ -36,8 +36,8 @@ class CarStateExt:
         from openpilot.common.params import Params
         p = Params()
         self._dyn_enabled = p.get_bool("DynamicAutoStock")
-        self._dyn_high = p.get_int("DynamicAutoStockSpeedKph", default=80)
-        self._dyn_low = p.get_int("DynamicAutoStockSpeedLowKph", default=70)
+        self._dyn_high = int(p.get("DynamicAutoStockSpeedKph", default="80"))
+        self._dyn_low = int(p.get("DynamicAutoStockSpeedLowKph", default="70"))
       except Exception:
         pass
 

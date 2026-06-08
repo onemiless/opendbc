@@ -54,16 +54,18 @@ class CarController(CarControllerBase):
         if CS.tesla_stock_longitudinal_active and CS.das_control is not None:
           # Echo Tesla's DAS_control values so stock ACC controls speed.
           # FWD always blocks Tesla's original → only our echo reaches powertrain.
-          # No C safety model sync needed for auto-stock.
+          # Clip accel to safety limits (-3.48 / +2.0 m/s²) so TX never blocks echo.
           das = CS.das_control
+          accel_min = max(das["DAS_accelMin"], -3.48)
+          accel_max = min(max(das["DAS_accelMax"], 0), 2.0)
           values = {
             "DAS_setSpeed": das["DAS_setSpeed"],
             "DAS_accState": das["DAS_accState"],
             "DAS_aebEvent": 0,
             "DAS_jerkMin": das["DAS_jerkMin"],
             "DAS_jerkMax": das["DAS_jerkMax"],
-            "DAS_accelMin": das["DAS_accelMin"],
-            "DAS_accelMax": das["DAS_accelMax"],
+            "DAS_accelMin": accel_min,
+            "DAS_accelMax": accel_max,
             "DAS_controlCounter": (self.frame // 4) % 8,
           }
           can_sends.append(self.packer.make_can_msg("DAS_control", CANBUS.party, values))
