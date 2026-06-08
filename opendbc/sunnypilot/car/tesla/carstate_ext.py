@@ -23,7 +23,7 @@ class CarStateExt:
     self.active_touch_points = 0
     self.tesla_stock_longitudinal_active = False
     self.prev_touch_points_for_long = 0
-    self._dyn_enabled = False
+    self._dyn_enabled = True
     self._dyn_high = 80
     self._dyn_low = 70
 
