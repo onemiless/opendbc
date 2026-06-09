@@ -31,13 +31,13 @@ class CarStateExt:
 
   def update(self, ret: structs.CarState, ret_sp: structs.CarStateSP, can_parsers: dict[StrEnum, CANParser]) -> None:
     self._dyn_frame += 1
-    if self._dyn_frame % 500 == 0:  # ~5 seconds
+    if self._dyn_frame % 100 == 0:  # ~1 second
       try:
         from openpilot.common.params import Params
         p = Params()
         self._dyn_enabled = p.get_bool("DynamicAutoStock")
-        self._dyn_high = int(p.get("DynamicAutoStockSpeedKph", default="80"))
-        self._dyn_low = int(p.get("DynamicAutoStockSpeedLowKph", default="70"))
+        self._dyn_high = int(p.get("DynamicAutoStockSpeedKph", return_default=True) or 80)
+        self._dyn_low = int(p.get("DynamicAutoStockSpeedLowKph", return_default=True) or 70)
       except Exception:
         pass
 
