@@ -11,6 +11,7 @@ from opendbc.can.parser import CANParser
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.tesla.values import DBC, CANBUS
 from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP
+from openpilot.common.params import Params
 
 ButtonType = structs.CarState.ButtonEvent.Type
 
@@ -23,23 +24,27 @@ class CarStateExt:
     self.active_touch_points = 0
     self.tesla_stock_longitudinal_active = False
     self.prev_touch_points_for_long = 0
-    self._dyn_enabled = False
-    self._dyn_high = 80
-    self._dyn_low = 70
     self._dyn_frame = 0
     self._manual_override = False
+    self._read_dyn_params()
+
+  def _read_dyn_params(self):
+    """Read dynamic auto-stock params from Params storage."""
+    try:
+      p = Params()
+      self._dyn_enabled = p.get_bool("DynamicAutoStock")
+      self._dyn_high = int(p.get("DynamicAutoStockSpeedKph", return_default=True) or 80)
+      self._dyn_low = int(p.get("DynamicAutoStockSpeedLowKph", return_default=True) or 70)
+    except Exception:
+      self._dyn_enabled = False
+      self._dyn_high = 80
+      self._dyn_low = 70
 
   def update(self, ret: structs.CarState, ret_sp: structs.CarStateSP, can_parsers: dict[StrEnum, CANParser]) -> None:
+    # Periodically refresh auto-stock params
     self._dyn_frame += 1
     if self._dyn_frame % 100 == 0:  # ~1 second
-      try:
-        from openpilot.common.params import Params
-        p = Params()
-        self._dyn_enabled = p.get_bool("DynamicAutoStock")
-        self._dyn_high = int(p.get("DynamicAutoStockSpeedKph", return_default=True) or 80)
-        self._dyn_low = int(p.get("DynamicAutoStockSpeedLowKph", return_default=True) or 70)
-      except Exception:
-        pass
+      self._read_dyn_params()
 
     if self.CP_SP.flags & TeslaFlagsSP.HAS_VEHICLE_BUS:
       cp_adas = can_parsers[Bus.adas]
@@ -67,8 +72,7 @@ class CarStateExt:
     # Auto-stock: speed-based toggle (won't override manual 4-finger)
     speed_kph = ret.vEgo * CV.MS_TO_KPH
     if self._manual_override:
-      if speed_kph < self._dyn_low:
-        self._manual_override = False
+      pass  # Manual override persists until user toggles 4-finger again
     elif self._dyn_enabled:
       if speed_kph > self._dyn_high:
         self.tesla_stock_longitudinal_active = True
