@@ -61,15 +61,16 @@ class CarController(CarControllerBase):
         if CS.tesla_stock_longitudinal_active and CS.das_control is not None:
           entering_stock = CS.tesla_stock_longitudinal_active and not self.prev_stock_longitudinal
           if entering_stock or self._stock_entry_frames > 0:
-            if self._stock_entry_frames < 2:
-              # Entry frames: send active ACC to engage car's stock ACC
+            if not CS.out.cruiseState.enabled:
+              # Cruise not yet engaged: send inactive accel (raw=375 → safety check passes).
+              # Safety model blocks non-inactive accel when get_longitudinal_allowed()=false.
               self._stock_entry_frames += 1
               state = 4
-              accel = 0.0  # Maintain current speed for smooth transition
+              accel = 0.0  # inactive raw=375, passes safety check
               cntr = (self.frame // 4) % 8
               can_sends.append(self.tesla_can.create_longitudinal_command(state, accel, cntr, CS.out.vEgo, CC.longActive, CS.cruise_override))
             else:
-              # Echo Tesla's DAS_control for stock ACC control
+              # Cruise confirmed engaged: start echoing car's DAS_control
               das = CS.das_control
               accel_min = max(das["DAS_accelMin"], -3.48)
               accel_max = min(max(das["DAS_accelMax"], 0), 2.0)
