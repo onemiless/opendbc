@@ -57,8 +57,6 @@ class CarController(CarControllerBase):
           CS.tesla_stock_longitudinal_active = False
           self.prev_stock_longitudinal = False
           self._stock_entry_frames = 0
-          cntr = (self.frame // 4) % 8
-          can_sends.append(self.tesla_can.create_longitudinal_command(13, 0, cntr, CS.out.vEgo, False, True))
 
         if CS.tesla_stock_longitudinal_active and CS.das_control is not None:
           entering_stock = CS.tesla_stock_longitudinal_active and not self.prev_stock_longitudinal
@@ -67,7 +65,7 @@ class CarController(CarControllerBase):
               # Entry frames: send active ACC to engage car's stock ACC
               self._stock_entry_frames += 1
               state = 4
-              accel = float(np.clip(actuators.accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
+              accel = 0.0  # Maintain current speed for smooth transition
               cntr = (self.frame // 4) % 8
               can_sends.append(self.tesla_can.create_longitudinal_command(state, accel, cntr, CS.out.vEgo, CC.longActive, CS.cruise_override))
             else:
@@ -77,7 +75,7 @@ class CarController(CarControllerBase):
               accel_max = min(max(das["DAS_accelMax"], 0), 2.0)
               values = {
                 "DAS_setSpeed": das["DAS_setSpeed"],
-                "DAS_accState": das["DAS_accState"],
+                "DAS_accState": 4,  # Always send active — don't echo cancel/inactive
                 "DAS_aebEvent": 0,
                 "DAS_jerkMin": das["DAS_jerkMin"],
                 "DAS_jerkMax": das["DAS_jerkMax"],
