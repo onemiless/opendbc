@@ -27,6 +27,7 @@ class CarController(CarControllerBase):
 
     # Avoid echoing stale CANCEL (DAS_accState=13) on first entry into stock longitudinal mode
     self.prev_stock_longitudinal = False
+    self._stock_entry_frames = 0  # Count frames since entering stock mode
     # Vehicle model used for lateral limiting
     self.VM = VehicleModel(get_safety_CP())
 
@@ -51,28 +52,45 @@ class CarController(CarControllerBase):
     # Longitudinal control
     if self.CP.openpilotLongitudinalControl:
       if self.frame % 4 == 0:
+        # On disengagement (cancel) while in stock mode, reset to SP
+        if CC.cruiseControl.cancel and self.prev_stock_longitudinal:
+          CS.tesla_stock_longitudinal_active = False
+          self.prev_stock_longitudinal = False
+          self._stock_entry_frames = 0
+          cntr = (self.frame // 4) % 8
+          can_sends.append(self.tesla_can.create_longitudinal_command(13, 0, cntr, CS.out.vEgo, False, True))
+
         if CS.tesla_stock_longitudinal_active and CS.das_control is not None:
-          # Echo Tesla's DAS_control values so stock ACC controls speed.
-          # FWD always blocks Tesla's original → only our echo reaches powertrain.
-          # Clip accel to safety limits (-3.48 / +2.0 m/s²) so TX never blocks echo.
-          das = CS.das_control
-          accel_min = max(das["DAS_accelMin"], -3.48)
-          accel_max = min(max(das["DAS_accelMax"], 0), 2.0)
-          values = {
-            "DAS_setSpeed": das["DAS_setSpeed"],
-            "DAS_accState": das["DAS_accState"],
-            "DAS_aebEvent": 0,
-            "DAS_jerkMin": das["DAS_jerkMin"],
-            "DAS_jerkMax": das["DAS_jerkMax"],
-            "DAS_accelMin": accel_min,
-            "DAS_accelMax": accel_max,
-            "DAS_controlCounter": (self.frame // 4) % 8,
-          }
-          can_sends.append(self.packer.make_can_msg("DAS_control", CANBUS.party, values))
+          entering_stock = CS.tesla_stock_longitudinal_active and not self.prev_stock_longitudinal
+          if entering_stock or self._stock_entry_frames > 0:
+            if self._stock_entry_frames < 2:
+              # Entry frames: send active ACC to engage car's stock ACC
+              self._stock_entry_frames += 1
+              state = 4
+              accel = float(np.clip(actuators.accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
+              cntr = (self.frame // 4) % 8
+              can_sends.append(self.tesla_can.create_longitudinal_command(state, accel, cntr, CS.out.vEgo, CC.longActive, CS.cruise_override))
+            else:
+              # Echo Tesla's DAS_control for stock ACC control
+              das = CS.das_control
+              accel_min = max(das["DAS_accelMin"], -3.48)
+              accel_max = min(max(das["DAS_accelMax"], 0), 2.0)
+              values = {
+                "DAS_setSpeed": das["DAS_setSpeed"],
+                "DAS_accState": das["DAS_accState"],
+                "DAS_aebEvent": 0,
+                "DAS_jerkMin": das["DAS_jerkMin"],
+                "DAS_jerkMax": das["DAS_jerkMax"],
+                "DAS_accelMin": accel_min,
+                "DAS_accelMax": accel_max,
+                "DAS_controlCounter": (self.frame // 4) % 8,
+              }
+              can_sends.append(self.packer.make_can_msg("DAS_control", CANBUS.party, values))
         elif not CS.tesla_stock_longitudinal_active:
           # SP longitudinal mode: send OP's own DAS_control
           leaving_stock = not CS.tesla_stock_longitudinal_active and self.prev_stock_longitudinal
           if leaving_stock:
+            self._stock_entry_frames = 0
             state = 4
             accel = 0.0
           else:

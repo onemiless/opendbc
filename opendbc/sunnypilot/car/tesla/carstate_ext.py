@@ -25,7 +25,6 @@ class CarStateExt:
     self.tesla_stock_longitudinal_active = False
     self.prev_touch_points_for_long = 0
     self._dyn_frame = 0
-    self._manual_override = False
     self._read_dyn_params()
 
   def _read_dyn_params(self):
@@ -67,13 +66,10 @@ class CarStateExt:
       self.prev_touch_points_for_long = self.active_touch_points
       if prev_touch_long != 4 and self.active_touch_points == 4:
         self.tesla_stock_longitudinal_active = not self.tesla_stock_longitudinal_active
-        self._manual_override = True
 
-    # Auto-stock: speed-based toggle (won't override manual 4-finger)
+    # Auto-stock: speed-based toggle
     speed_kph = ret.vEgo * CV.MS_TO_KPH
-    if self._manual_override:
-      pass  # Manual override persists until user toggles 4-finger again
-    elif self._dyn_enabled:
+    if self._dyn_enabled:
       if speed_kph > self._dyn_high:
         self.tesla_stock_longitudinal_active = True
       elif speed_kph < self._dyn_low:
