@@ -28,6 +28,7 @@ class CarController(CarControllerBase):
     # Avoid echoing stale CANCEL (DAS_accState=13) on first entry into stock longitudinal mode
     self.prev_stock_longitudinal = False
     self._stock_entry_frames = 0  # Count frames since entering stock mode
+    self._cancel_prev = False  # Track cancel state for falling-edge detection
     # Vehicle model used for lateral limiting
     self.VM = VehicleModel(get_safety_CP())
 
@@ -52,18 +53,23 @@ class CarController(CarControllerBase):
     # Longitudinal control
     if self.CP.openpilotLongitudinalControl:
       if self.frame % 4 == 0:
-        # On disengagement (cancel) while in stock mode, reset to SP
-        if CC.cruiseControl.cancel and self.prev_stock_longitudinal:
+        # On disengagement (cancel falling edge) while in stock mode, reset to SP
+        # Note: for Tesla (pcmCruise=False), CC.cruiseControl.cancel = CS.cruiseState.enabled
+        # so we detect the FALLING edge (True→False) to fire only once on disengagement.
+        cancel_now = CC.cruiseControl.cancel
+        if self._cancel_prev and not cancel_now and self.prev_stock_longitudinal:
           CS.tesla_stock_longitudinal_active = False
           self.prev_stock_longitudinal = False
           self._stock_entry_frames = 0
+        self._cancel_prev = cancel_now
 
         if CS.tesla_stock_longitudinal_active and CS.das_control is not None:
           entering_stock = CS.tesla_stock_longitudinal_active and not self.prev_stock_longitudinal
           if entering_stock or self._stock_entry_frames > 0:
-            if not CS.out.cruiseState.enabled:
-              # Cruise not yet engaged: send inactive accel (raw=375 → safety check passes).
-              # Safety model blocks non-inactive accel when get_longitudinal_allowed()=false.
+            if self._stock_entry_frames < 2 or not CS.out.cruiseState.enabled:
+              # Always send at least 2 inactive entry frames before echo, so the safety
+              # model's get_longitudinal_allowed() has time to stabilize before non-inactive
+              # accel values are sent. Also send inactive if cruise disengages mid-stock.
               self._stock_entry_frames += 1
               state = 4
               accel = 0.0  # inactive raw=375, passes safety check
