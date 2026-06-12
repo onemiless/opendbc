@@ -45,7 +45,7 @@ class CarStateExt:
     if self._dyn_frame % 100 == 0:  # ~1 second
       self._read_dyn_params()
 
-    if self.CP_SP.flags & TeslaFlagsSP.HAS_VEHICLE_BUS:
+    if Bus.adas in can_parsers:
       cp_adas = can_parsers[Bus.adas]
 
       prev_active_touch_points = self.active_touch_points
@@ -95,7 +95,9 @@ class CarStateExt:
   def get_parser(CP: structs.CarParams, CP_SP: structs.CarParamsSP) -> dict[StrEnum, CANParser]:
     messages = {}
 
-    if CP_SP.flags & TeslaFlagsSP.HAS_VEHICLE_BUS:
+    try:
       messages[Bus.adas] = CANParser(DBC[CP.carFingerprint][Bus.adas], [], CANBUS.vehicle)
+    except (KeyError, Exception):
+      pass  # Model X may not have Bus.adas in DBC
 
     return messages
