@@ -53,49 +53,10 @@ class CarController(CarControllerBase):
     # Longitudinal control
     if self.CP.openpilotLongitudinalControl:
       if self.frame % 4 == 0:
-        # On disengagement (cancel falling edge) while in stock mode, reset to SP
-        # Note: for Tesla (pcmCruise=False), CC.cruiseControl.cancel = CS.cruiseState.enabled
-        # so we detect the FALLING edge (True→False) to fire only once on disengagement.
-        cancel_now = CC.cruiseControl.cancel
-        if self._cancel_prev and not cancel_now and self.prev_stock_longitudinal:
-          CS.tesla_stock_longitudinal_active = False
-          self.prev_stock_longitudinal = False
-          self._stock_entry_frames = 0
-        self._cancel_prev = cancel_now
-
-        if CS.tesla_stock_longitudinal_active and CS.das_control is not None:
-          entering_stock = CS.tesla_stock_longitudinal_active and not self.prev_stock_longitudinal
-          if entering_stock or self._stock_entry_frames > 0:
-            if self._stock_entry_frames < 2 or not CS.out.cruiseState.enabled:
-              # Always send at least 2 inactive entry frames before echo, so the safety
-              # model's get_longitudinal_allowed() has time to stabilize before non-inactive
-              # accel values are sent. Also send inactive if cruise disengages mid-stock.
-              self._stock_entry_frames += 1
-              state = 4
-              accel = 0.0  # inactive raw=375, passes safety check
-              cntr = (self.frame // 4) % 8
-              can_sends.append(self.tesla_can.create_longitudinal_command(state, accel, cntr, CS.out.vEgo, CC.longActive, CS.cruise_override))
-            else:
-              # Cruise confirmed engaged: start echoing car's DAS_control
-              das = CS.das_control
-              accel_min = max(das["DAS_accelMin"], -3.48)
-              accel_max = min(max(das["DAS_accelMax"], 0), 2.0)
-              values = {
-                "DAS_setSpeed": das["DAS_setSpeed"],
-                "DAS_accState": 4,  # Always send active — don't echo cancel/inactive
-                "DAS_aebEvent": 0,
-                "DAS_jerkMin": das["DAS_jerkMin"],
-                "DAS_jerkMax": das["DAS_jerkMax"],
-                "DAS_accelMin": accel_min,
-                "DAS_accelMax": accel_max,
-                "DAS_controlCounter": (self.frame // 4) % 8,
-              }
-              can_sends.append(self.packer.make_can_msg("DAS_control", CANBUS.party, values))
-        elif not CS.tesla_stock_longitudinal_active:
+        if not CS.tesla_stock_longitudinal_active:
           # SP longitudinal mode: send OP's own DAS_control
           leaving_stock = not CS.tesla_stock_longitudinal_active and self.prev_stock_longitudinal
           if leaving_stock:
-            self._stock_entry_frames = 0
             state = 4
             accel = 0.0
           else:
@@ -103,6 +64,8 @@ class CarController(CarControllerBase):
             accel = float(np.clip(actuators.accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
           cntr = (self.frame // 4) % 8
           can_sends.append(self.tesla_can.create_longitudinal_command(state, accel, cntr, CS.out.vEgo, CC.longActive, CS.cruise_override))
+        # Stock longitudinal mode: send neutral DAS_control to satisfy
+        # safety model heartbeat requirement. FWD blocks Tesla original.
 
     else:
       # Increment counter so cancel is prioritized even without openpilot longitudinal

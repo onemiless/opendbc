@@ -324,17 +324,14 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
     int acc_state = msg->data[1] >> 4;
 
     if (tesla_longitudinal) {
-      // When stock longitudinal is active (4-finger toggle toggles via RX hook),
-      // openpilot echoes car's DAS_control. Skip accel checks so echo passes.
-      // For auto-stock (safety model not synced), checks still apply — entry
-      // frames send inactive accel which passes regardless.
-      if (!tesla_stock_longitudinal_active) {
-        if ((raw_accel_max < TESLA_LONG_LIMITS.inactive_accel) && (raw_accel_min < TESLA_LONG_LIMITS.inactive_accel)) {
-          violation = true;
-        }
-        violation |= longitudinal_accel_checks(raw_accel_max, TESLA_LONG_LIMITS);
-        violation |= longitudinal_accel_checks(raw_accel_min, TESLA_LONG_LIMITS);
+      // All acceleration limits below apply to OP's own longitudinal commands.
+      // Stock mode (4-finger / auto-stock) echoes neutral DAS_control
+      // (inactive accel) from the TX hook path; those always pass.
+      if ((raw_accel_max < TESLA_LONG_LIMITS.inactive_accel) && (raw_accel_min < TESLA_LONG_LIMITS.inactive_accel)) {
+        violation = true;
       }
+      violation |= longitudinal_accel_checks(raw_accel_max, TESLA_LONG_LIMITS);
+      violation |= longitudinal_accel_checks(raw_accel_min, TESLA_LONG_LIMITS);
     } else {
       // Can only send cancel longitudinal messages when not controlling longitudinal
       if (acc_state != 13) {  // ACC_CANCEL_GENERIC_SILENT
@@ -392,9 +389,9 @@ static bool tesla_fwd_hook(int bus_num, int addr) {
         block_msg = true;
       }
 
-      // DAS_control - always block when OP longitudinal is active.
-      // Stock mode uses TX echo path — no FWD dependency on stock toggle.
-      if (tesla_longitudinal && (addr == 0x2b9) && !tesla_stock_aeb) {
+      // DAS_control - block Tesla's commands when OP longitudinal is active,
+      // unless stock longitudinal is toggled (4-finger syncs C safety to stock).
+      if (tesla_longitudinal && !tesla_stock_longitudinal_active && (addr == 0x2b9) && !tesla_stock_aeb) {
         block_msg = true;
       }
     }
