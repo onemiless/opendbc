@@ -11,7 +11,6 @@ from opendbc.can.parser import CANParser
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.tesla.values import DBC, CANBUS
 from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP
-from openpilot.common.params import Params
 
 ButtonType = structs.CarState.ButtonEvent.Type
 
@@ -30,6 +29,7 @@ class CarStateExt:
   def _read_dyn_params(self):
     """Read dynamic auto-stock params from Params storage."""
     try:
+      from openpilot.common.params import Params
       p = Params()
       self._dyn_enabled = p.get_bool("DynamicAutoStock")
       self._dyn_high = int(p.get("DynamicAutoStockSpeedKph", return_default=True) or 80)
