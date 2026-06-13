@@ -412,6 +412,7 @@ static safety_config tesla_init(uint16_t param) {
     {0x370, 0, 8, .check_relay = false, .disable_static_blocking = true},  // EPAS3S_sysStatus (nag killer)
     {0x399, 0, 8, .check_relay = false, .disable_static_blocking = true},  // ISA speed chime suppress
     {0x249, 0, 3, .check_relay = false, .disable_static_blocking = true},  // SCCM_leftStalk (turn signal)
+    {0x3DF, 1, 8, .check_relay = false, .disable_static_blocking = true},  // UI_status2 (fake 4-finger for auto-stock)
   };
 
   static const CanMsg TESLA_M3_Y_LONG_TX_MSGS[] = {
@@ -423,6 +424,7 @@ static safety_config tesla_init(uint16_t param) {
     {0x370, 0, 8, .check_relay = false, .disable_static_blocking = true}, // EPAS3S_sysStatus (nag killer)
     {0x399, 0, 8, .check_relay = false, .disable_static_blocking = true}, // ISA speed chime suppress
     {0x249, 0, 3, .check_relay = false, .disable_static_blocking = true}, // SCCM_leftStalk (turn signal)
+    {0x3DF, 1, 8, .check_relay = false, .disable_static_blocking = true}, // UI_status2 (fake 4-finger for auto-stock)
   };
 
   const uint16_t TESLA_FLAG_FSD_14 = 2;

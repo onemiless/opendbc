@@ -24,6 +24,7 @@ class CarStateExt:
     self.tesla_stock_longitudinal_active = False
     self.prev_touch_points_for_long = 0
     self._dyn_frame = 0
+    self._toggle_request = False
     self._read_dyn_params()
 
   def _read_dyn_params(self):
@@ -67,13 +68,13 @@ class CarStateExt:
       if prev_touch_long != 4 and self.active_touch_points == 4:
         self.tesla_stock_longitudinal_active = not self.tesla_stock_longitudinal_active
 
-    # Auto-stock: speed-based toggle
+    # Auto-stock: request CAN-based 4-finger toggle (same signal flow as real 4-finger)
     speed_kph = ret.vEgo * CV.MS_TO_KPH
     if self._dyn_enabled:
-      if speed_kph > self._dyn_high:
-        self.tesla_stock_longitudinal_active = True
-      elif speed_kph < self._dyn_low:
-        self.tesla_stock_longitudinal_active = False
+      if speed_kph > self._dyn_high and not self.tesla_stock_longitudinal_active:
+        self._toggle_request = True
+      elif speed_kph < self._dyn_low and self.tesla_stock_longitudinal_active:
+        self._toggle_request = True
 
     if self.tesla_stock_longitudinal_active:
       ret_sp.flags |= TeslaFlagsSP.STOCK_LONGITUDINAL_ACTIVE.value

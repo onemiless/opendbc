@@ -51,6 +51,11 @@ class CarController(CarControllerBase):
     # Longitudinal control
     if self.CP.openpilotLongitudinalControl:
       if self.frame % 4 == 0:
+        # Auto-stock: send fake UI_status2 to sync safety model (same signal flow as 4-finger)
+        if getattr(CS, '_toggle_request', False):
+          CS._toggle_request = False
+          can_sends.append([0x3DF, 0, b'\x00\x00\x00\x04\x00\x00\x00\x00', CANBUS.vehicle])
+
         if not CS.tesla_stock_longitudinal_active:
           # SP longitudinal mode: send OP's own DAS_control
           leaving_stock = not CS.tesla_stock_longitudinal_active and self.prev_stock_longitudinal
