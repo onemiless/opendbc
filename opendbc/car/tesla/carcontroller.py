@@ -51,41 +51,49 @@ class CarController(CarControllerBase):
     # Longitudinal control
     if self.CP.openpilotLongitudinalControl:
       if self.frame % 4 == 0:
-        # Auto-stock: send fake UI_status2 to sync safety model (same signal flow as 4-finger)
+        # Auto-stock toggle: send fake UI_status2 to sync safety model
         if getattr(CS, '_toggle_request', False):
           CS._toggle_request = False
           can_sends.append([0x3DF, 0, b'\x00\x00\x00\x04\x00\x00\x00\x00', CANBUS.vehicle])
 
-        if not CS.tesla_stock_longitudinal_active:
-          # SP longitudinal mode: send OP's own DAS_control
+        if CS.tesla_stock_longitudinal_active and CS.das_control is not None:
+          # Echo Tesla's DAS_control values so stock ACC controls speed while
+          # openpilot maintains the DAS_control heartbeat the car expects.
+          das = CS.das_control
+
+          # When entering stock longitudinal mode, the DAS_accState on bus 2
+          # may be stale CANCEL (13) because OP was previously overriding it.
+          # Suppress stale CANCEL on mode entry to prevent immediate ACC cancel.
+          acc_state = das["DAS_accState"]
+          entering_stock = CS.tesla_stock_longitudinal_active and not self.prev_stock_longitudinal
+          if entering_stock and acc_state == 13:
+            acc_state = 4  # ACC_ON
+
+
+          values = {
+            "DAS_setSpeed": das["DAS_setSpeed"],
+            "DAS_accState": acc_state,
+            "DAS_aebEvent": 0,  # Never echo AEB events
+            "DAS_jerkMin": das["DAS_jerkMin"],
+            "DAS_jerkMax": das["DAS_jerkMax"],
+            "DAS_accelMin": das["DAS_accelMin"],
+            "DAS_accelMax": das["DAS_accelMax"],
+            "DAS_controlCounter": (self.frame // 4) % 8,
+          }
+          can_sends.append(self.packer.make_can_msg("DAS_control", CANBUS.party, values))
+
+        else:
+          # When leaving stock longitudinal back to OP longitudinal, avoid
+          # sending CANCEL even if the state machine is disabled — the car's
+          # ACC is already active and we want a seamless takeover.
           leaving_stock = not CS.tesla_stock_longitudinal_active and self.prev_stock_longitudinal
-          if leaving_stock:
-            state = 4
-            accel = 0.0
+          if leaving_stock and CS.cruiseState.enabled:
+            state = 4  # ACC_ON: preserve active cruise during transition
           else:
-            state = 13 if CC.cruiseControl.cancel else 4
-            accel = float(np.clip(actuators.accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
+            state = 13 if CC.cruiseControl.cancel else 4  # 4=ACC_ON, 13=ACC_CANCEL_GENERIC_SILENT
+          accel = float(np.clip(actuators.accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
           cntr = (self.frame // 4) % 8
           can_sends.append(self.tesla_can.create_longitudinal_command(state, accel, cntr, CS.out.vEgo, CC.longActive, CS.cruise_override))
-        else:
-          # Stock longitudinal mode: forward car's actual DAS_control
-          # so bus 0 values match what the car's DAS sends on bus 2.
-          # This prevents powertrain safety validation mismatches.
-          das = CS.das_control
-          if das is not None:
-            accel_min = max(das["DAS_accelMin"], -3.48)
-            accel_max = min(max(das["DAS_accelMax"], 0), 2.0)
-            values = {
-              "DAS_setSpeed": das["DAS_setSpeed"],
-              "DAS_accState": das["DAS_accState"],
-              "DAS_aebEvent": 0,
-              "DAS_jerkMin": das["DAS_jerkMin"],
-              "DAS_jerkMax": das["DAS_jerkMax"],
-              "DAS_accelMin": accel_min,
-              "DAS_accelMax": accel_max,
-              "DAS_controlCounter": (self.frame // 4) % 8,
-            }
-            can_sends.append(self.packer.make_can_msg("DAS_control", CANBUS.party, values))
 
     else:
       # Increment counter so cancel is prioritized even without openpilot longitudinal

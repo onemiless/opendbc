@@ -390,9 +390,9 @@ static bool tesla_fwd_hook(int bus_num, int addr) {
       }
 
       // DAS_control - block Tesla's commands when OP longitudinal is active.
-      // When stock longitudinal is active (4-finger or auto-stock via Python),
-      // Python stops sending OP longitudinal and DAS_control passes through FWD.
-      if (tesla_longitudinal && !tesla_stock_longitudinal_active && (addr == 0x2b9) && !tesla_stock_aeb) {
+      // OpenPilot always sends its own DAS_control via TX; stock mode echoes
+      // Tesla values so there is exactly one canonical source on the bus.
+      if (tesla_longitudinal && (addr == 0x2b9) && !tesla_stock_aeb) {
         block_msg = true;
       }
     }
