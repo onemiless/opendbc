@@ -62,8 +62,14 @@ class CarController(CarControllerBase):
             accel = float(np.clip(actuators.accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
           cntr = (self.frame // 4) % 8
           can_sends.append(self.tesla_can.create_longitudinal_command(state, accel, cntr, CS.out.vEgo, CC.longActive, CS.cruise_override))
-        # Stock longitudinal mode: send neutral DAS_control to satisfy
-        # safety model heartbeat requirement. FWD blocks Tesla original.
+        else:
+          # Stock longitudinal mode: send neutral DAS_control to satisfy
+          # safety model heartbeat requirement. FWD may or may not be blocked.
+          # accel=0.0 → raw=375 (inactive) → always passes safety check.
+          state = 4
+          accel = 0.0
+          cntr = (self.frame // 4) % 8
+          can_sends.append(self.tesla_can.create_longitudinal_command(state, accel, cntr, CS.out.vEgo, CC.longActive, CS.cruise_override))
 
     else:
       # Increment counter so cancel is prioritized even without openpilot longitudinal
