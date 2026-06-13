@@ -56,7 +56,27 @@ class CarController(CarControllerBase):
           CS._toggle_request = False
           can_sends.append([0x3DF, 0, b'\x00\x00\x00\x04\x00\x00\x00\x00', CANBUS.vehicle])
 
-        if not CS.tesla_stock_longitudinal_active:
+        # Stock mode: forward car's actual DAS_control on bus 0.
+        # FWD always blocks (no pass-through) so no double-send.
+        if CS.tesla_stock_longitudinal_active and CS.das_control is not None:
+          das = CS.das_control
+          acc_state = das["DAS_accState"]
+          entering_stock = CS.tesla_stock_longitudinal_active and not self.prev_stock_longitudinal
+          if entering_stock and acc_state == 13:
+            acc_state = 4  # Suppress stale CANCEL on entry
+          values = {
+            "DAS_setSpeed": das["DAS_setSpeed"],
+            "DAS_accState": acc_state,
+            "DAS_aebEvent": 0,
+            "DAS_jerkMin": das["DAS_jerkMin"],
+            "DAS_jerkMax": das["DAS_jerkMax"],
+            "DAS_accelMin": das["DAS_accelMin"],
+            "DAS_accelMax": das["DAS_accelMax"],
+            "DAS_controlCounter": (self.frame // 4) % 8,
+          }
+          can_sends.append(self.packer.make_can_msg("DAS_control", CANBUS.party, values))
+
+        else:
           # When leaving stock longitudinal back to OP longitudinal, avoid
           # sending CANCEL even if the state machine is disabled — the car's
           # ACC is already active and we want a seamless takeover.
