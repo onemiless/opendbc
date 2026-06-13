@@ -389,8 +389,9 @@ static bool tesla_fwd_hook(int bus_num, int addr) {
         block_msg = true;
       }
 
-      // DAS_control - block Tesla's commands when OP longitudinal is active,
-      // unless stock longitudinal is toggled (4-finger syncs C safety to stock).
+      // DAS_control - block Tesla's commands when OP longitudinal is active.
+      // When stock longitudinal is active (4-finger or auto-stock via Python),
+      // Python stops sending OP longitudinal and DAS_control passes through FWD.
       if (tesla_longitudinal && !tesla_stock_longitudinal_active && (addr == 0x2b9) && !tesla_stock_aeb) {
         block_msg = true;
       }

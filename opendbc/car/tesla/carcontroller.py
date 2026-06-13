@@ -27,8 +27,6 @@ class CarController(CarControllerBase):
 
     # Avoid echoing stale CANCEL (DAS_accState=13) on first entry into stock longitudinal mode
     self.prev_stock_longitudinal = False
-    self._stock_entry_frames = 0  # Count frames since entering stock mode
-    self._cancel_prev = False  # Track cancel state for falling-edge detection
     # Vehicle model used for lateral limiting
     self.VM = VehicleModel(get_safety_CP())
 

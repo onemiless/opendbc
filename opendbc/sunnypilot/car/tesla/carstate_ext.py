@@ -11,7 +11,6 @@ from opendbc.can.parser import CANParser
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.tesla.values import DBC, CANBUS
 from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP
-from openpilot.common.params import Params
 
 ButtonType = structs.CarState.ButtonEvent.Type
 
