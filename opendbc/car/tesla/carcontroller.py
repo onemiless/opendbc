@@ -56,33 +56,7 @@ class CarController(CarControllerBase):
           CS._toggle_request = False
           can_sends.append([0x3DF, 0, b'\x00\x00\x00\x04\x00\x00\x00\x00', CANBUS.vehicle])
 
-        if CS.tesla_stock_longitudinal_active and CS.das_control is not None:
-          # Echo Tesla's DAS_control values so stock ACC controls speed while
-          # openpilot maintains the DAS_control heartbeat the car expects.
-          das = CS.das_control
-
-          # When entering stock longitudinal mode, the DAS_accState on bus 2
-          # may be stale CANCEL (13) because OP was previously overriding it.
-          # Suppress stale CANCEL on mode entry to prevent immediate ACC cancel.
-          acc_state = das["DAS_accState"]
-          entering_stock = CS.tesla_stock_longitudinal_active and not self.prev_stock_longitudinal
-          if entering_stock and acc_state == 13:
-            acc_state = 4  # ACC_ON
-
-
-          values = {
-            "DAS_setSpeed": das["DAS_setSpeed"],
-            "DAS_accState": acc_state,
-            "DAS_aebEvent": 0,  # Never echo AEB events
-            "DAS_jerkMin": das["DAS_jerkMin"],
-            "DAS_jerkMax": das["DAS_jerkMax"],
-            "DAS_accelMin": das["DAS_accelMin"],
-            "DAS_accelMax": das["DAS_accelMax"],
-            "DAS_controlCounter": (self.frame // 4) % 8,
-          }
-          can_sends.append(self.packer.make_can_msg("DAS_control", CANBUS.party, values))
-
-        else:
+        if not CS.tesla_stock_longitudinal_active:
           # When leaving stock longitudinal back to OP longitudinal, avoid
           # sending CANCEL even if the state machine is disabled — the car's
           # ACC is already active and we want a seamless takeover.
