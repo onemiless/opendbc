@@ -63,13 +63,24 @@ class CarController(CarControllerBase):
           cntr = (self.frame // 4) % 8
           can_sends.append(self.tesla_can.create_longitudinal_command(state, accel, cntr, CS.out.vEgo, CC.longActive, CS.cruise_override))
         else:
-          # Stock longitudinal mode: send neutral DAS_control to satisfy
-          # safety model heartbeat requirement. FWD may or may not be blocked.
-          # accel=0.0 → raw=375 (inactive) → always passes safety check.
-          state = 4
-          accel = 0.0
-          cntr = (self.frame // 4) % 8
-          can_sends.append(self.tesla_can.create_longitudinal_command(state, accel, cntr, CS.out.vEgo, CC.longActive, CS.cruise_override))
+          # Stock longitudinal mode: forward car's actual DAS_control
+          # so bus 0 values match what the car's DAS sends on bus 2.
+          # This prevents powertrain safety validation mismatches.
+          das = CS.das_control
+          if das is not None:
+            accel_min = max(das["DAS_accelMin"], -3.48)
+            accel_max = min(max(das["DAS_accelMax"], 0), 2.0)
+            values = {
+              "DAS_setSpeed": das["DAS_setSpeed"],
+              "DAS_accState": das["DAS_accState"],
+              "DAS_aebEvent": 0,
+              "DAS_jerkMin": das["DAS_jerkMin"],
+              "DAS_jerkMax": das["DAS_jerkMax"],
+              "DAS_accelMin": accel_min,
+              "DAS_accelMax": accel_max,
+              "DAS_controlCounter": (self.frame // 4) % 8,
+            }
+            can_sends.append(self.packer.make_can_msg("DAS_control", CANBUS.party, values))
 
     else:
       # Increment counter so cancel is prioritized even without openpilot longitudinal
