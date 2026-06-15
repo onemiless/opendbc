@@ -68,16 +68,15 @@ class CarStateExt:
       if prev_touch_long != 4 and self.active_touch_points == 4:
         self.tesla_stock_longitudinal_active = not self.tesla_stock_longitudinal_active
 
-    # Auto-stock: set the Python-side stock flag directly.
-    # safety sync happens via fake UI_status2 in carcontroller.py.
+    # Auto-stock: trigger same UI_status2 CAN message as 4-finger.
+    # The CAN parser detects it and toggles tesla_stock_longitudinal_active.
+    # No direct state manipulation — same code path as real 4-finger.
     speed_kph = ret.vEgo * CV.MS_TO_KPH
     if self._dyn_enabled:
-      if speed_kph > self._dyn_high and not self.tesla_stock_longitudinal_active:
-        self.tesla_stock_longitudinal_active = True
-        self._toggle_request = True  # trigger CAN sync in carcontroller
-      elif speed_kph < self._dyn_low and self.tesla_stock_longitudinal_active:
-        self.tesla_stock_longitudinal_active = False
-        self._toggle_request = True  # trigger CAN sync in carcontroller
+      if speed_kph > self._dyn_high and not self.tesla_stock_longitudinal_active and not self._toggle_request:
+        self._toggle_request = True
+      elif speed_kph < self._dyn_low and self.tesla_stock_longitudinal_active and not self._toggle_request:
+        self._toggle_request = True
 
     if self.tesla_stock_longitudinal_active:
       ret_sp.flags |= TeslaFlagsSP.STOCK_LONGITUDINAL_ACTIVE.value
