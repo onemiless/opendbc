@@ -52,6 +52,14 @@ class CarStateExt:
       prev_active_touch_points = self.active_touch_points
       self.active_touch_points = int(cp_adas.vl["UI_status2"]["UI_activeTouchPoints"])
 
+      # Auto-stock: override touch_points=4 so 4-finger detection handles the toggle.
+      # Same code path as real 4-finger — no CAN message, no direct state set.
+      speed_kph = ret.vEgo * CV.MS_TO_KPH
+      if self._dyn_enabled:
+        if (speed_kph > self._dyn_high and not self.tesla_stock_longitudinal_active) or \
+           (speed_kph < self._dyn_low and self.tesla_stock_longitudinal_active):
+          self.active_touch_points = 4
+
       finger_count = None
       if self.CP_SP.flags & TeslaFlagsSP.MADS_SCREEN_BUTTON_3_FINGER:
         finger_count = 3
@@ -62,21 +70,11 @@ class CarStateExt:
         ret.buttonEvents = [*create_button_events(self.active_touch_points, prev_active_touch_points,
                                                   {finger_count: ButtonType.lkas})]
 
-      # 4-finger touch toggles stock longitudinal — pure memory toggle, zero I/O
+      # 4-finger touch toggles stock longitudinal — also handles auto-stock via override above
       prev_touch_long = self.prev_touch_points_for_long
       self.prev_touch_points_for_long = self.active_touch_points
       if prev_touch_long != 4 and self.active_touch_points == 4:
         self.tesla_stock_longitudinal_active = not self.tesla_stock_longitudinal_active
-
-    # Auto-stock: trigger same UI_status2 CAN message as 4-finger.
-    # The CAN parser detects it and toggles tesla_stock_longitudinal_active.
-    # No direct state manipulation — same code path as real 4-finger.
-    speed_kph = ret.vEgo * CV.MS_TO_KPH
-    if self._dyn_enabled:
-      if speed_kph > self._dyn_high and not self.tesla_stock_longitudinal_active and not self._toggle_request:
-        self._toggle_request = True
-      elif speed_kph < self._dyn_low and self.tesla_stock_longitudinal_active and not self._toggle_request:
-        self._toggle_request = True
 
     if self.tesla_stock_longitudinal_active:
       ret_sp.flags |= TeslaFlagsSP.STOCK_LONGITUDINAL_ACTIVE.value
