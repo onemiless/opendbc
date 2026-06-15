@@ -324,15 +324,13 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
     int acc_state = msg->data[1] >> 4;
 
     if (tesla_longitudinal) {
-      // When stock longitudinal is active, openpilot echoes Tesla's own
-      // DAS_control values — skip accel checks so hard braking etc. passes.
-      if (!tesla_stock_longitudinal_active) {
-        if ((raw_accel_max < TESLA_LONG_LIMITS.inactive_accel) && (raw_accel_min < TESLA_LONG_LIMITS.inactive_accel)) {
-          violation = true;
-        }
-        violation |= longitudinal_accel_checks(raw_accel_max, TESLA_LONG_LIMITS);
-        violation |= longitudinal_accel_checks(raw_accel_min, TESLA_LONG_LIMITS);
+      // Stock mode (FWD pass-through) doesn't send via TX. Only SP mode
+      // DAS_control goes through — always apply accel checks.
+      if ((raw_accel_max < TESLA_LONG_LIMITS.inactive_accel) && (raw_accel_min < TESLA_LONG_LIMITS.inactive_accel)) {
+        violation = true;
       }
+      violation |= longitudinal_accel_checks(raw_accel_max, TESLA_LONG_LIMITS);
+      violation |= longitudinal_accel_checks(raw_accel_min, TESLA_LONG_LIMITS);
     } else {
       // Can only send cancel longitudinal messages when not controlling longitudinal
       if (acc_state != 13) {  // ACC_CANCEL_GENERIC_SILENT
@@ -390,10 +388,9 @@ static bool tesla_fwd_hook(int bus_num, int addr) {
         block_msg = true;
       }
 
-      // DAS_control - block Tesla's commands when OP longitudinal is active.
-      // OpenPilot always sends its own DAS_control via TX; stock mode echoes
-      // Tesla values so there is exactly one canonical source on the bus.
-      if (tesla_longitudinal && (addr == 0x2b9) && !tesla_stock_aeb) {
+      // DAS_control - block when OP longitudinal active AND NOT in stock mode.
+      // Stock mode (4-finger / CAN-sim) unblocks FWD → car's DAS flows directly.
+      if (tesla_longitudinal && !tesla_stock_longitudinal_active && (addr == 0x2b9) && !tesla_stock_aeb) {
         block_msg = true;
       }
     }
