@@ -59,6 +59,7 @@ class CarStateExt:
         if (speed_kph > self._dyn_high and not self.tesla_stock_longitudinal_active) or \
            (speed_kph < self._dyn_low and self.tesla_stock_longitudinal_active):
           self.active_touch_points = 4
+          self._toggle_request = True  # CAN sim to sync safety model
 
       finger_count = None
       if self.CP_SP.flags & TeslaFlagsSP.MADS_SCREEN_BUTTON_3_FINGER:
