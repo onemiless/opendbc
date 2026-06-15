@@ -324,14 +324,15 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
     int acc_state = msg->data[1] >> 4;
 
     if (tesla_longitudinal) {
-      // All acceleration limits below apply to OP's own longitudinal commands.
-      // Stock mode (4-finger / auto-stock) echoes neutral DAS_control
-      // (inactive accel) from the TX hook path; those always pass.
-      if ((raw_accel_max < TESLA_LONG_LIMITS.inactive_accel) && (raw_accel_min < TESLA_LONG_LIMITS.inactive_accel)) {
-        violation = true;
+      // When stock longitudinal is active, openpilot echoes Tesla's own
+      // DAS_control values — skip accel checks so hard braking etc. passes.
+      if (!tesla_stock_longitudinal_active) {
+        if ((raw_accel_max < TESLA_LONG_LIMITS.inactive_accel) && (raw_accel_min < TESLA_LONG_LIMITS.inactive_accel)) {
+          violation = true;
+        }
+        violation |= longitudinal_accel_checks(raw_accel_max, TESLA_LONG_LIMITS);
+        violation |= longitudinal_accel_checks(raw_accel_min, TESLA_LONG_LIMITS);
       }
-      violation |= longitudinal_accel_checks(raw_accel_max, TESLA_LONG_LIMITS);
-      violation |= longitudinal_accel_checks(raw_accel_min, TESLA_LONG_LIMITS);
     } else {
       // Can only send cancel longitudinal messages when not controlling longitudinal
       if (acc_state != 13) {  // ACC_CANCEL_GENERIC_SILENT
