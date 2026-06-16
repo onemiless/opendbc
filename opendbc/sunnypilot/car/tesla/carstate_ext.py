@@ -52,8 +52,6 @@ class CarStateExt:
       if (speed_kph > self._dyn_high and not self.tesla_stock_longitudinal_active) or \
          (speed_kph < self._dyn_low and self.tesla_stock_longitudinal_active):
         self.active_touch_points = 4
-        self._toggle_request = True  # CAN sim to sync safety model
-
     if Bus.adas in can_parsers:
       cp_adas = can_parsers[Bus.adas]
 
