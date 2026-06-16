@@ -77,7 +77,7 @@ class CarController(CarControllerBase):
           accel_max = min(max(das["DAS_accelMax"], 0), 2.0)
           values = {
             "DAS_setSpeed": das["DAS_setSpeed"],
-            "DAS_accState": das["DAS_accState"],
+            "DAS_accState": 4,  # Always ACTIVE — cancel via brake/stalk, not DAS_control
             "DAS_aebEvent": 0,
             "DAS_jerkMin": das["DAS_jerkMin"],
             "DAS_jerkMax": das["DAS_jerkMax"],
