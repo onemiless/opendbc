@@ -57,8 +57,7 @@ class CarController(CarControllerBase):
           can_sends.append([0x3DF, 0, b'\x00\x00\x00\x04\x00\x00\x00\x00', CANBUS.vehicle])
 
         # SP mode: send OP's own DAS_control. Stock mode: echo car's DAS values.
-        # FWD has pass-through (!tesla_stock_longitudinal_active) for 4-finger (C synced).
-        # Echo is fallback for auto-stock (C not synced, FWD blocked).
+        # FWD always blocks → echo is the only source on bus 0. No double-send.
         if not CS.tesla_stock_longitudinal_active:
           # When leaving stock longitudinal back to OP longitudinal, avoid
           # sending CANCEL even if the state machine is disabled — the car's

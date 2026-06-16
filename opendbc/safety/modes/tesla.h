@@ -388,9 +388,9 @@ static bool tesla_fwd_hook(int bus_num, int addr) {
         block_msg = true;
       }
 
-      // DAS_control - block when OP longitudinal active AND NOT in stock mode.
-      // Stock mode (4-finger / CAN-sim) unblocks FWD → car's DAS flows directly.
-      if (tesla_longitudinal && !tesla_stock_longitudinal_active && (addr == 0x2b9) && !tesla_stock_aeb) {
+      // DAS_control - always block when OP longitudinal is active.
+      // Stock mode uses TX echo — one canonical source on the bus, no double-send.
+      if (tesla_longitudinal && (addr == 0x2b9) && !tesla_stock_aeb) {
         block_msg = true;
       }
     }
