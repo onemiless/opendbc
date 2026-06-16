@@ -46,20 +46,22 @@ class CarStateExt:
     if self._dyn_frame % 100 == 0:  # ~1 second
       self._read_dyn_params()
 
+    # Auto-stock override: use touch_points=4 so 4-finger detection handles toggle.
+    speed_kph = ret.vEgo * CV.MS_TO_KPH
+    if self._dyn_enabled:
+      if (speed_kph > self._dyn_high and not self.tesla_stock_longitudinal_active) or \
+         (speed_kph < self._dyn_low and self.tesla_stock_longitudinal_active):
+        self.active_touch_points = 4
+        self._toggle_request = True  # CAN sim to sync safety model
+
     if Bus.adas in can_parsers:
       cp_adas = can_parsers[Bus.adas]
 
       prev_active_touch_points = self.active_touch_points
       self.active_touch_points = int(cp_adas.vl["UI_status2"]["UI_activeTouchPoints"])
-
-      # Auto-stock: override touch_points=4 so 4-finger detection handles the toggle.
-      # Same code path as real 4-finger — no CAN message, no direct state set.
-      speed_kph = ret.vEgo * CV.MS_TO_KPH
-      if self._dyn_enabled:
-        if (speed_kph > self._dyn_high and not self.tesla_stock_longitudinal_active) or \
-           (speed_kph < self._dyn_low and self.tesla_stock_longitudinal_active):
-          self.active_touch_points = 4
-          self._toggle_request = True  # CAN sim to sync safety model
+      # Keep auto-stock override if set
+      if self._dyn_enabled and (speed_kph > self._dyn_high or speed_kph < self._dyn_low):
+        self.active_touch_points = 4
 
       finger_count = None
       if self.CP_SP.flags & TeslaFlagsSP.MADS_SCREEN_BUTTON_3_FINGER:
