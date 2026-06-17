@@ -51,13 +51,7 @@ class CarController(CarControllerBase):
     # Longitudinal control
     if self.CP.openpilotLongitudinalControl:
       if self.frame % 4 == 0:
-        # Auto-stock toggle: send fake UI_status2 to sync safety model
-        if getattr(CS, '_toggle_request', False):
-          CS._toggle_request = False
-          can_sends.append([0x3DF, 0, b'\x00\x00\x00\x04\x00\x00\x00\x00', CANBUS.vehicle])
-
-        # SP mode: send OP's own DAS_control. Stock mode: echo car's DAS values.
-        # FWD always blocks → echo is the only source on bus 0. No double-send.
+        # SP mode sends OP's own DAS_control. Stock mode lets panda forward the OEM DAS_control.
         if not CS.tesla_stock_longitudinal_active:
           # When leaving stock longitudinal back to OP longitudinal, avoid
           # sending CANCEL even if the state machine is disabled — the car's
@@ -70,22 +64,6 @@ class CarController(CarControllerBase):
           accel = float(np.clip(actuators.accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
           cntr = (self.frame // 4) % 8
           can_sends.append(self.tesla_can.create_longitudinal_command(state, accel, cntr, CS.out.vEgo, CC.longActive, CS.cruise_override))
-        elif CS.das_control is not None:
-          # Stock mode: echo car's DAS_control as fallback (FWD may be blocked for auto-stock).
-          das = CS.das_control
-          accel_min = max(das["DAS_accelMin"], -3.48)
-          accel_max = min(max(das["DAS_accelMax"], 0), 2.0)
-          values = {
-            "DAS_setSpeed": das["DAS_setSpeed"],
-            "DAS_accState": 4,  # Always ACTIVE — cancel via brake/stalk, not DAS_control
-            "DAS_aebEvent": 0,
-            "DAS_jerkMin": das["DAS_jerkMin"],
-            "DAS_jerkMax": das["DAS_jerkMax"],
-            "DAS_accelMin": accel_min,
-            "DAS_accelMax": accel_max,
-            "DAS_controlCounter": (self.frame // 4) % 8,
-          }
-          can_sends.append(self.packer.make_can_msg("DAS_control", CANBUS.party, values))
 
     else:
       # Increment counter so cancel is prioritized even without openpilot longitudinal

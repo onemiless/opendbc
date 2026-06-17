@@ -23,8 +23,9 @@ class CarStateExt:
     self.active_touch_points = 0
     self.tesla_stock_longitudinal_active = False
     self.prev_touch_points_for_long = 0
-    self._dyn_frame = 0
-    self._toggle_request = False
+    self._dyn_enter_frames = 0
+    self._dyn_exit_frames = 0
+    self._dyn_cooldown_frames = 0
     self._read_dyn_params()
 
   def _read_dyn_params(self):
@@ -32,27 +33,40 @@ class CarStateExt:
     try:
       from openpilot.common.params import Params
       p = Params()
-      self._dyn_enabled = p.get_bool("DynamicAutoStock")
-      self._dyn_high = int(p.get("DynamicAutoStockSpeedKph", return_default=True) or 80)
-      self._dyn_low = int(p.get("DynamicAutoStockSpeedLowKph", return_default=True) or 70)
+      self._dyn_enabled = p.get_bool("DynamicAutoStock") and bool(self.CP_SP.flags & TeslaFlagsSP.DYNAMIC_AUTO_STOCK)
+      self._dyn_high = max(0, min(155, int(p.get("DynamicAutoStockSpeedKph", return_default=True) or 80)))
+      self._dyn_low = max(0, min(155, int(p.get("DynamicAutoStockSpeedLowKph", return_default=True) or 70)))
     except Exception:
       self._dyn_enabled = False
       self._dyn_high = 80
       self._dyn_low = 70
+    self._dyn_high = (self._dyn_high // 5) * 5
+    self._dyn_low = (self._dyn_low // 5) * 5
+    if self._dyn_high == 0:
+      self._dyn_high = 80
+    if self._dyn_low >= self._dyn_high:
+      self._dyn_low = max(0, self._dyn_high - 5)
 
   def update(self, ret: structs.CarState, ret_sp: structs.CarStateSP, can_parsers: dict[StrEnum, CANParser]) -> None:
-    # Periodically refresh auto-stock params
-    self._dyn_frame += 1
-    if self._dyn_frame % 100 == 0:  # ~1 second
-      self._read_dyn_params()
-
-    # Auto-stock: direct state toggle based on speed thresholds.
+    # Auto-stock: use startup params only. Safety receives the same thresholds when the safety mode is set.
     speed_kph = ret.vEgo * CV.MS_TO_KPH
     if self._dyn_enabled:
-      if speed_kph > self._dyn_high and not self.tesla_stock_longitudinal_active:
+      self._dyn_cooldown_frames = max(0, self._dyn_cooldown_frames - 1)
+      stock_ready = ret.cruiseState.available and not ret.accFaulted
+      enter_stock = speed_kph > self._dyn_high and stock_ready
+      exit_stock = speed_kph < self._dyn_low
+
+      self._dyn_enter_frames = self._dyn_enter_frames + 1 if enter_stock else 0
+      self._dyn_exit_frames = self._dyn_exit_frames + 1 if exit_stock else 0
+
+      if self._dyn_enter_frames >= 100 and not self.tesla_stock_longitudinal_active and self._dyn_cooldown_frames == 0:
         self.tesla_stock_longitudinal_active = True
-      elif speed_kph < self._dyn_low and self.tesla_stock_longitudinal_active:
+        self._dyn_cooldown_frames = 200
+        self._dyn_enter_frames = 0
+      elif self._dyn_exit_frames >= 100 and self.tesla_stock_longitudinal_active and self._dyn_cooldown_frames == 0:
         self.tesla_stock_longitudinal_active = False
+        self._dyn_cooldown_frames = 200
+        self._dyn_exit_frames = 0
     if Bus.adas in can_parsers:
       cp_adas = can_parsers[Bus.adas]
 
@@ -69,11 +83,14 @@ class CarStateExt:
         ret.buttonEvents = [*create_button_events(self.active_touch_points, prev_active_touch_points,
                                                   {finger_count: ButtonType.lkas})]
 
-      # 4-finger touch toggles stock longitudinal — also handles auto-stock via override above
+      # 4-finger touch toggles stock longitudinal immediately.
       prev_touch_long = self.prev_touch_points_for_long
       self.prev_touch_points_for_long = self.active_touch_points
       if prev_touch_long != 4 and self.active_touch_points == 4:
         self.tesla_stock_longitudinal_active = not self.tesla_stock_longitudinal_active
+        self._dyn_cooldown_frames = 200
+        self._dyn_enter_frames = 0
+        self._dyn_exit_frames = 0
 
     if self.tesla_stock_longitudinal_active:
       ret_sp.flags |= TeslaFlagsSP.STOCK_LONGITUDINAL_ACTIVE.value
