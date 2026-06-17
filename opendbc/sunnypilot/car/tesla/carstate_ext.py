@@ -22,9 +22,11 @@ class CarStateExt:
 
     self.active_touch_points = 0
     self.tesla_stock_longitudinal_active = False
+    self._dyn_auto_active = False
     self.prev_touch_points_for_long = 0
     self._dyn_enter_frames = 0
     self._dyn_exit_frames = 0
+    self._dyn_no_cruise_frames = 0
     self._dyn_cooldown_frames = 0
     self._read_dyn_params()
 
@@ -47,24 +49,58 @@ class CarStateExt:
     if self._dyn_low >= self._dyn_high:
       self._dyn_low = max(0, self._dyn_high - 5)
 
+  def _stock_longitudinal_ready(self, ret: structs.CarState, speed_kph: float) -> bool:
+    if ret.brakePressed or ret.gasPressed or not ret.cruiseState.enabled or ret.accFaulted:
+      return False
+
+    das = getattr(self, "das_control", None)
+    if das is None:
+      return False
+
+    set_speed = float(das["DAS_setSpeed"])
+    stock_accel = (float(das["DAS_accelMin"]) + float(das["DAS_accelMax"])) / 2.0
+    speed_matched = abs(set_speed - speed_kph) < 8.0
+    accel_matched = abs(stock_accel) < 0.7
+    vehicle_stable = abs(ret.aEgo) < 0.35
+    stock_active = int(das["DAS_accState"]) in (2, 3, 4, 5)
+    return speed_matched and accel_matched and vehicle_stable and stock_active
+
   def update(self, ret: structs.CarState, ret_sp: structs.CarStateSP, can_parsers: dict[StrEnum, CANParser]) -> None:
     # Auto-stock: use startup params only. Safety receives the same thresholds when the safety mode is set.
     speed_kph = ret.vEgo * CV.MS_TO_KPH
     if self._dyn_enabled:
       self._dyn_cooldown_frames = max(0, self._dyn_cooldown_frames - 1)
-      stock_ready = ret.cruiseState.available and not ret.accFaulted
+      if ret.brakePressed or ret.gasPressed:
+        if self._dyn_auto_active and self.tesla_stock_longitudinal_active:
+          self.tesla_stock_longitudinal_active = False
+          self._dyn_auto_active = False
+        self._dyn_cooldown_frames = 300
+        self._dyn_enter_frames = 0
+        self._dyn_exit_frames = 0
+
+      self._dyn_no_cruise_frames = self._dyn_no_cruise_frames + 1 if not ret.cruiseState.enabled else 0
+      if self._dyn_auto_active and self.tesla_stock_longitudinal_active and self._dyn_no_cruise_frames >= 50:
+        self.tesla_stock_longitudinal_active = False
+        self._dyn_auto_active = False
+        self._dyn_cooldown_frames = 300
+        self._dyn_enter_frames = 0
+        self._dyn_exit_frames = 0
+
+      stock_ready = self._stock_longitudinal_ready(ret, speed_kph)
       enter_stock = speed_kph > self._dyn_high and stock_ready
-      exit_stock = speed_kph < self._dyn_low
+      exit_stock = speed_kph < self._dyn_low and abs(ret.aEgo) < 0.45 and not ret.brakePressed
 
       self._dyn_enter_frames = self._dyn_enter_frames + 1 if enter_stock else 0
       self._dyn_exit_frames = self._dyn_exit_frames + 1 if exit_stock else 0
 
       if self._dyn_enter_frames >= 100 and not self.tesla_stock_longitudinal_active and self._dyn_cooldown_frames == 0:
         self.tesla_stock_longitudinal_active = True
+        self._dyn_auto_active = True
         self._dyn_cooldown_frames = 200
         self._dyn_enter_frames = 0
-      elif self._dyn_exit_frames >= 100 and self.tesla_stock_longitudinal_active and self._dyn_cooldown_frames == 0:
+      elif self._dyn_exit_frames >= 100 and self._dyn_auto_active and self.tesla_stock_longitudinal_active and self._dyn_cooldown_frames == 0:
         self.tesla_stock_longitudinal_active = False
+        self._dyn_auto_active = False
         self._dyn_cooldown_frames = 200
         self._dyn_exit_frames = 0
     if Bus.adas in can_parsers:
@@ -88,9 +124,11 @@ class CarStateExt:
       self.prev_touch_points_for_long = self.active_touch_points
       if prev_touch_long != 4 and self.active_touch_points == 4:
         self.tesla_stock_longitudinal_active = not self.tesla_stock_longitudinal_active
+        self._dyn_auto_active = False
         self._dyn_cooldown_frames = 200
         self._dyn_enter_frames = 0
         self._dyn_exit_frames = 0
+        self._dyn_no_cruise_frames = 0
 
     if self.tesla_stock_longitudinal_active:
       ret_sp.flags |= TeslaFlagsSP.STOCK_LONGITUDINAL_ACTIVE.value
