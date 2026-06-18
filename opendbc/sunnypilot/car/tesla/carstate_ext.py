@@ -14,6 +14,9 @@ from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP
 
 ButtonType = structs.CarState.ButtonEvent.Type
 
+DYNAMIC_STOCK_MAX_SPEED_ERROR_KPH = 2.0
+DYNAMIC_STOCK_MAX_ACCEL_ERROR = 0.35
+
 
 class CarStateExt:
   def __init__(self, CP: structs.CarParams, CP_SP: structs.CarParamsSP):
@@ -49,10 +52,15 @@ class CarStateExt:
 
   def update(self, ret: structs.CarState, ret_sp: structs.CarStateSP, can_parsers: dict[StrEnum, CANParser]) -> None:
     # Auto-stock: use startup params only. Safety receives the same thresholds when the safety mode is set.
-    speed_kph = ret.vEgo * CV.MS_TO_KPH
+    cp_party = can_parsers[Bus.party]
+    speed_kph = float(cp_party.vl["DI_speed"]["DI_vehicleSpeed"])
     if self._dyn_enabled:
       self._dyn_cooldown_frames = max(0, self._dyn_cooldown_frames - 1)
-      stock_ready = ret.cruiseState.available and not ret.accFaulted
+      stock_set_speed = float(self.das_control["DAS_setSpeed"])
+      stock_accel = (float(self.das_control["DAS_accelMin"]) + float(self.das_control["DAS_accelMax"])) / 2.0
+      stock_ready = (int(self.das_control["DAS_accState"]) in (2, 3, 4, 5) and
+                     abs(stock_set_speed - speed_kph) <= DYNAMIC_STOCK_MAX_SPEED_ERROR_KPH and
+                     abs(stock_accel) <= DYNAMIC_STOCK_MAX_ACCEL_ERROR)
       enter_stock = speed_kph > self._dyn_high and stock_ready
       exit_stock = speed_kph < self._dyn_low
 
@@ -94,8 +102,6 @@ class CarStateExt:
 
     if self.tesla_stock_longitudinal_active:
       ret_sp.flags |= TeslaFlagsSP.STOCK_LONGITUDINAL_ACTIVE.value
-    cp_party = can_parsers[Bus.party]
-
     cp_ap_party = can_parsers[Bus.ap_party]
 
     speed_units = self.can_define.dv["DI_state"]["DI_speedUnits"].get(int(cp_party.vl["DI_state"]["DI_speedUnits"]), None)

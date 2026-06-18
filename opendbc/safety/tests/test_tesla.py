@@ -432,6 +432,43 @@ class TestTeslaLongitudinalSafety(TestTeslaSafetyBase):
   RELAY_MALFUNCTION_ADDRS = {0: (MSG_DAS_steeringControl, MSG_APS_eacMonitor, MSG_DAS_Control)}
   FWD_BLACKLISTED_ADDRS = {2: [MSG_DAS_steeringControl, MSG_APS_eacMonitor, MSG_DAS_Control]}
 
+  def test_dynamic_stock_waits_for_matched_target_and_accel(self):
+    high_kph_units = 40 // 5
+    low_kph_units = 35 // 5
+    param_sp = (TeslaSafetyFlagsSP.DYNAMIC_AUTO_STOCK |
+                (high_kph_units << TeslaSafetyFlagsSP.DYNAMIC_AUTO_STOCK_HIGH_SHIFT) |
+                (low_kph_units << TeslaSafetyFlagsSP.DYNAMIC_AUTO_STOCK_LOW_SHIFT))
+    self.addCleanup(self.safety.set_current_safety_param_sp, 0)
+    self.safety.set_current_safety_param_sp(param_sp)
+    self.safety.set_safety_hooks(CarParams.SafetyModel.tesla, self.SAFETY_PARAM)
+    self.safety.init_tests()
+
+    def update_stock(set_speed, accel, acc_state=None):
+      state = self.acc_states["ACC_ON"] if acc_state is None else acc_state
+      msg = self._long_control_msg(set_speed, acc_state=state,
+                                   accel_limits=(accel, accel), bus=2)
+      self.assertTrue(self._rx(msg))
+
+    def send_speed(speed_kph, frames):
+      for _ in range(frames):
+        self.assertTrue(self._rx(self._speed_msg(speed_kph / 3.6)))
+
+    update_stock(50, 0)
+    send_speed(41, 60)
+    self.assertEqual(-1, self.safety.safety_fwd_hook(2, MSG_DAS_Control))
+
+    update_stock(50, 1.0)
+    send_speed(49, 60)
+    self.assertEqual(-1, self.safety.safety_fwd_hook(2, MSG_DAS_Control))
+
+    update_stock(50, 0.0, acc_state=0)
+    send_speed(49, 60)
+    self.assertEqual(-1, self.safety.safety_fwd_hook(2, MSG_DAS_Control))
+
+    update_stock(50, 0.0)
+    send_speed(49, 50)
+    self.assertEqual(0, self.safety.safety_fwd_hook(2, MSG_DAS_Control))
+
   def test_no_aeb(self):
     for aeb_event in range(4):
       self.assertEqual(self._tx(self._long_control_msg(10, aeb_event=aeb_event)), aeb_event == 0)

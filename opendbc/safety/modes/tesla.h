@@ -51,6 +51,11 @@ static float tesla_dynamic_auto_stock_low_ms = 70.0 * KPH_TO_MS;
 static uint8_t tesla_dynamic_auto_stock_enter_frames = 0U;
 static uint8_t tesla_dynamic_auto_stock_exit_frames = 0U;
 static uint8_t tesla_dynamic_auto_stock_cooldown_frames = 0U;
+static bool tesla_stock_das_valid = false;
+static uint16_t tesla_stock_das_set_speed_raw = 4095U;
+static uint16_t tesla_stock_das_accel_min_raw = 511U;
+static uint16_t tesla_stock_das_accel_max_raw = 511U;
+static uint8_t tesla_stock_das_acc_state = 15U;
 
 static uint8_t tesla_get_counter(const CANPacket_t *msg) {
 
@@ -174,7 +179,14 @@ static void tesla_rx_hook(const CANPacket_t *msg) {
           tesla_dynamic_auto_stock_cooldown_frames--;
         }
 
-        bool enter_stock = speed > tesla_dynamic_auto_stock_high_ms;
+        int speed_kph10 = ROUND((speed / KPH_TO_MS) * 10.0);
+        int stock_accel_center_centi = ((tesla_stock_das_accel_min_raw + tesla_stock_das_accel_max_raw) * 2) - 1500;
+        bool stock_ready = tesla_stock_das_valid &&
+                           ((tesla_stock_das_acc_state == 2U) || (tesla_stock_das_acc_state == 3U) ||
+                            (tesla_stock_das_acc_state == 4U) || (tesla_stock_das_acc_state == 5U)) &&
+                           (SAFETY_ABS((int)tesla_stock_das_set_speed_raw - speed_kph10) <= 20) &&
+                           (SAFETY_ABS(stock_accel_center_centi) <= 35);
+        bool enter_stock = (speed > tesla_dynamic_auto_stock_high_ms) && stock_ready;
         bool exit_stock = speed < tesla_dynamic_auto_stock_low_ms;
         tesla_dynamic_auto_stock_enter_frames = enter_stock ? SAFETY_MIN(tesla_dynamic_auto_stock_enter_frames + 1U, 100U) : 0U;
         tesla_dynamic_auto_stock_exit_frames = exit_stock ? SAFETY_MIN(tesla_dynamic_auto_stock_exit_frames + 1U, 100U) : 0U;
@@ -264,6 +276,13 @@ static void tesla_rx_hook(const CANPacket_t *msg) {
     if (msg->addr == 0x2b9U) {
       // "AEB_ACTIVE"
       tesla_stock_aeb = (msg->data[2] & 0x03U) == 1U;
+      tesla_stock_das_set_speed_raw = msg->data[0] | ((msg->data[1] & 0x0FU) << 8);
+      tesla_stock_das_acc_state = msg->data[1] >> 4;
+      tesla_stock_das_accel_min_raw = ((msg->data[5] & 0x0FU) << 5) | (msg->data[4] >> 3);
+      tesla_stock_das_accel_max_raw = ((msg->data[6] & 0x1FU) << 4) | (msg->data[5] >> 4);
+      tesla_stock_das_valid = (tesla_stock_das_set_speed_raw != 4095U) &&
+                              (tesla_stock_das_accel_min_raw != 511U) &&
+                              (tesla_stock_das_accel_max_raw != 511U);
     }
 
     // DAS_steeringControl
@@ -508,6 +527,11 @@ static safety_config tesla_init(uint16_t param) {
   tesla_dynamic_auto_stock_enter_frames = 0U;
   tesla_dynamic_auto_stock_exit_frames = 0U;
   tesla_dynamic_auto_stock_cooldown_frames = 0U;
+  tesla_stock_das_valid = false;
+  tesla_stock_das_set_speed_raw = 4095U;
+  tesla_stock_das_accel_min_raw = 511U;
+  tesla_stock_das_accel_max_raw = 511U;
+  tesla_stock_das_acc_state = 15U;
   // we need to assume Autopark/Summon on startup since DI_state is a low freq msg.
   // this is so that we don't fault if starting while these systems are active
   tesla_summon = true;
