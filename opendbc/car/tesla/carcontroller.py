@@ -4,7 +4,7 @@ from opendbc.car import Bus
 from opendbc.car.lateral import apply_steer_angle_limits_vm
 from opendbc.car.interfaces import CarControllerBase
 from opendbc.car.tesla.teslacan import TeslaCAN
-from opendbc.car.tesla.values import CANBUS, CarControllerParams
+from opendbc.car.tesla.values import CarControllerParams
 from opendbc.car.vehicle_model import VehicleModel
 from opendbc.sunnypilot.car.tesla.coop_steering import CoopSteeringCarController
 
@@ -24,9 +24,11 @@ class CarController(CarControllerBase):
     self.packer = CANPacker(dbc_names[Bus.party])
     self.tesla_can = TeslaCAN(CP, self.packer)
 
-
-    # Avoid echoing stale CANCEL (DAS_accState=13) on first entry into stock longitudinal mode
+    # Track longitudinal source transitions independently of the 25 Hz TX phase.
     self.prev_stock_longitudinal = False
+    self.leaving_stock_pending = False
+    self.long_control_counter = None
+    self.last_long_control_frame = -4
     # Vehicle model used for lateral limiting
     self.VM = VehicleModel(get_safety_CP())
 
@@ -50,20 +52,32 @@ class CarController(CarControllerBase):
 
     # Longitudinal control
     if self.CP.openpilotLongitudinalControl:
-      if self.frame % 4 == 0:
+      entering_stock = CS.tesla_stock_longitudinal_active and not self.prev_stock_longitudinal
+      leaving_stock = not CS.tesla_stock_longitudinal_active and self.prev_stock_longitudinal
+      if entering_stock:
+        # Safety consumes the marker as an internal handoff request; it is never
+        # transmitted onto the vehicle bus.
+        can_sends.append(self.tesla_can.create_stock_longitudinal_handoff(CS.das_control))
+        self.leaving_stock_pending = False
+      elif leaving_stock:
+        self.leaving_stock_pending = True
+
+      long_control_due = (self.frame - self.last_long_control_frame) >= 4
+      if long_control_due or self.leaving_stock_pending:
         # SP mode sends OP's own DAS_control. Stock mode lets panda forward the OEM DAS_control.
         if not CS.tesla_stock_longitudinal_active:
           # When leaving stock longitudinal back to OP longitudinal, avoid
           # sending CANCEL even if the state machine is disabled — the car's
           # ACC is already active and we want a seamless takeover.
-          leaving_stock = not CS.tesla_stock_longitudinal_active and self.prev_stock_longitudinal
-          if leaving_stock and CS.cruiseState.enabled:
+          if self.leaving_stock_pending and CS.cruiseState.enabled:
             state = 4  # ACC_ON: preserve active cruise during transition
           else:
             state = 13 if CC.cruiseControl.cancel else 4  # 4=ACC_ON, 13=ACC_CANCEL_GENERIC_SILENT
           accel = float(np.clip(actuators.accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
-          cntr = (self.frame // 4) % 8
+          cntr = self._next_long_control_counter(CS.das_control["DAS_controlCounter"], self.leaving_stock_pending)
           can_sends.append(self.tesla_can.create_longitudinal_command(state, accel, cntr, CS.out.vEgo, CC.longActive, CS.cruise_override))
+          self.last_long_control_frame = self.frame
+          self.leaving_stock_pending = False
 
     else:
       # Increment counter so cancel is prioritized even without openpilot longitudinal
@@ -81,3 +95,9 @@ class CarController(CarControllerBase):
     self.prev_stock_longitudinal = CS.tesla_stock_longitudinal_active
     self.frame += 1
     return new_actuators, can_sends
+
+  def _next_long_control_counter(self, stock_counter, resync=False):
+    if self.long_control_counter is None or resync:
+      self.long_control_counter = int(stock_counter)
+    self.long_control_counter = (self.long_control_counter + 1) % 8
+    return self.long_control_counter

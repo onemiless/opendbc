@@ -128,7 +128,7 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
     }
     return self.packer.make_can_msg_safety("DI_state", 0, values)
 
-  def _long_control_msg(self, set_speed, acc_state=0, jerk_limits=(0, 0), accel_limits=(0, 0), aeb_event=0, bus=0):
+  def _long_control_msg(self, set_speed, acc_state=0, jerk_limits=(0, 0), accel_limits=(0, 0), aeb_event=0, bus=0, counter=None):
     values = {
       "DAS_setSpeed": set_speed,
       "DAS_accState": acc_state,
@@ -138,6 +138,8 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
       "DAS_accelMin": accel_limits[0],
       "DAS_accelMax": accel_limits[1],
     }
+    if counter is not None:
+      values["DAS_controlCounter"] = counter
     return self.packer.make_can_msg_safety("DAS_control", bus, values)
 
   def _accel_msg(self, accel: float):
@@ -432,42 +434,31 @@ class TestTeslaLongitudinalSafety(TestTeslaSafetyBase):
   RELAY_MALFUNCTION_ADDRS = {0: (MSG_DAS_steeringControl, MSG_APS_eacMonitor, MSG_DAS_Control)}
   FWD_BLACKLISTED_ADDRS = {2: [MSG_DAS_steeringControl, MSG_APS_eacMonitor, MSG_DAS_Control]}
 
-  def test_dynamic_stock_waits_for_matched_target_and_accel(self):
-    high_kph_units = 40 // 5
-    low_kph_units = 35 // 5
-    param_sp = (TeslaSafetyFlagsSP.DYNAMIC_AUTO_STOCK |
-                (high_kph_units << TeslaSafetyFlagsSP.DYNAMIC_AUTO_STOCK_HIGH_SHIFT) |
-                (low_kph_units << TeslaSafetyFlagsSP.DYNAMIC_AUTO_STOCK_LOW_SHIFT))
+  def test_dynamic_stock_handoff_is_atomic(self):
+    param_sp = TeslaSafetyFlagsSP.DYNAMIC_AUTO_STOCK
     self.addCleanup(self.safety.set_current_safety_param_sp, 0)
     self.safety.set_current_safety_param_sp(param_sp)
     self.safety.set_safety_hooks(CarParams.SafetyModel.tesla, self.SAFETY_PARAM)
     self.safety.init_tests()
+    self.assertTrue(self._rx(self._pcm_status_msg(True, 0)))
+    self.safety.set_controls_allowed(True)
 
-    def update_stock(set_speed, accel, acc_state=None):
-      state = self.acc_states["ACC_ON"] if acc_state is None else acc_state
-      msg = self._long_control_msg(set_speed, acc_state=state,
-                                   accel_limits=(accel, accel), bus=2)
-      self.assertTrue(self._rx(msg))
+    for stock_counter in (3, 6):
+      stock = self._long_control_msg(50, acc_state=self.acc_states["ACC_ON"],
+                                     accel_limits=(0, 0), bus=2, counter=stock_counter)
+      handoff = self._long_control_msg(50, acc_state=self.acc_states["ACC_ON"],
+                                       accel_limits=(0, 0), aeb_event=3, bus=0, counter=stock_counter)
+      self.assertTrue(self._rx(stock))
+      self.assertEqual(-1, self.safety.safety_fwd_hook(2, MSG_DAS_Control))
 
-    def send_speed(speed_kph, frames):
-      for _ in range(frames):
-        self.assertTrue(self._rx(self._speed_msg(speed_kph / 3.6)))
+      self.assertFalse(self._tx(handoff))
+      self.assertEqual(0, self.safety.safety_fwd_hook(2, MSG_DAS_Control))
 
-    update_stock(50, 0)
-    send_speed(41, 60)
-    self.assertEqual(-1, self.safety.safety_fwd_hook(2, MSG_DAS_Control))
-
-    update_stock(50, 1.0)
-    send_speed(49, 60)
-    self.assertEqual(-1, self.safety.safety_fwd_hook(2, MSG_DAS_Control))
-
-    update_stock(50, 0.0, acc_state=0)
-    send_speed(49, 60)
-    self.assertEqual(-1, self.safety.safety_fwd_hook(2, MSG_DAS_Control))
-
-    update_stock(50, 0.0)
-    send_speed(49, 50)
-    self.assertEqual(0, self.safety.safety_fwd_hook(2, MSG_DAS_Control))
+      op_counter = (stock_counter + 1) % 8
+      op_cmd = self._long_control_msg(50, acc_state=self.acc_states["ACC_ON"],
+                                      accel_limits=(0, 0), bus=0, counter=op_counter)
+      self.assertTrue(self._tx(op_cmd))
+      self.assertEqual(-1, self.safety.safety_fwd_hook(2, MSG_DAS_Control))
 
   def test_no_aeb(self):
     for aeb_event in range(4):

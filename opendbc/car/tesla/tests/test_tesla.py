@@ -1,11 +1,15 @@
 import re
 import unittest
+from types import SimpleNamespace
 
+from opendbc.can import CANPacker
 from opendbc.car import gen_empty_fingerprint
 from opendbc.car.structs import CarParams
+from opendbc.car.tesla.carcontroller import CarController
 from opendbc.car.tesla.interface import CarInterface
 from opendbc.car.tesla.fingerprints import FW_VERSIONS
 from opendbc.car.tesla.radar_interface import RADAR_START_ADDR
+from opendbc.car.tesla.teslacan import TeslaCAN
 from opendbc.car.tesla.values import CAR, FSD_14_FW
 
 Ecu = CarParams.Ecu
@@ -102,3 +106,32 @@ class TestTeslaFingerprint(unittest.TestCase):
         fingerprint[1][RADAR_START_ADDR] = 8
       CP = CarInterface.get_params(CAR.TESLA_MODEL_X, fingerprint, [], False, False, False)
       assert CP.radarUnavailable  # Always unavailable since no radar DBC
+
+
+class TestTeslaLongitudinalHandoff(unittest.TestCase):
+  def test_counter_resyncs_after_each_stock_period(self):
+    controller = CarController.__new__(CarController)
+    controller.long_control_counter = None
+
+    self.assertEqual(3, controller._next_long_control_counter(2))
+    self.assertEqual(4, controller._next_long_control_counter(7))
+    self.assertEqual(7, controller._next_long_control_counter(6, resync=True))
+    self.assertEqual(0, controller._next_long_control_counter(3))
+    self.assertEqual(2, controller._next_long_control_counter(1, resync=True))
+
+  def test_stock_handoff_uses_blocked_internal_marker(self):
+    values = {
+      "DAS_setSpeed": 50.0,
+      "DAS_accState": 4,
+      "DAS_aebEvent": 0,
+      "DAS_jerkMin": -1.0,
+      "DAS_jerkMax": 0.5,
+      "DAS_accelMin": -0.2,
+      "DAS_accelMax": 0.3,
+      "DAS_controlCounter": 6,
+    }
+    tesla_can = TeslaCAN(SimpleNamespace(flags=0), CANPacker("tesla_model3_party"))
+    _, actual, _ = tesla_can.create_stock_longitudinal_handoff(values)
+    aeb_event = actual[2] & 0x03
+
+    self.assertEqual(3, aeb_event)

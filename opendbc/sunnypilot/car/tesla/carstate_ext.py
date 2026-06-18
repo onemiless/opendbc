@@ -29,6 +29,7 @@ class CarStateExt:
     self._dyn_enter_frames = 0
     self._dyn_exit_frames = 0
     self._dyn_cooldown_frames = 0
+    self._stock_counter_last = None
     self._read_dyn_params()
 
   def _read_dyn_params(self):
@@ -56,22 +57,29 @@ class CarStateExt:
     speed_kph = float(cp_party.vl["DI_speed"]["DI_vehicleSpeed"])
     if self._dyn_enabled:
       self._dyn_cooldown_frames = max(0, self._dyn_cooldown_frames - 1)
+      stock_counter = int(self.das_control["DAS_controlCounter"])
+      stock_das_updated = self._stock_counter_last is None or stock_counter != self._stock_counter_last
+      self._stock_counter_last = stock_counter
       stock_set_speed = float(self.das_control["DAS_setSpeed"])
       stock_accel = (float(self.das_control["DAS_accelMin"]) + float(self.das_control["DAS_accelMax"])) / 2.0
-      stock_ready = (int(self.das_control["DAS_accState"]) in (2, 3, 4, 5) and
+      stock_acc_active = int(self.das_control["DAS_accState"]) in (2, 3, 4, 5)
+      stock_ready = (stock_acc_active and
+                     int(self.das_control["DAS_aebEvent"]) == 0 and
                      abs(stock_set_speed - speed_kph) <= DYNAMIC_STOCK_MAX_SPEED_ERROR_KPH and
                      abs(stock_accel) <= DYNAMIC_STOCK_MAX_ACCEL_ERROR)
       enter_stock = speed_kph > self._dyn_high and stock_ready
-      exit_stock = speed_kph < self._dyn_low
+      exit_stock = speed_kph < self._dyn_low and stock_acc_active and ret.cruiseState.enabled and not ret.brakePressed
 
       self._dyn_enter_frames = self._dyn_enter_frames + 1 if enter_stock else 0
       self._dyn_exit_frames = self._dyn_exit_frames + 1 if exit_stock else 0
 
-      if self._dyn_enter_frames >= 100 and not self.tesla_stock_longitudinal_active and self._dyn_cooldown_frames == 0:
+      if (self._dyn_enter_frames >= 100 and not self.tesla_stock_longitudinal_active and
+          self._dyn_cooldown_frames == 0 and stock_das_updated):
         self.tesla_stock_longitudinal_active = True
         self._dyn_cooldown_frames = 200
         self._dyn_enter_frames = 0
-      elif self._dyn_exit_frames >= 100 and self.tesla_stock_longitudinal_active and self._dyn_cooldown_frames == 0:
+      elif (self._dyn_exit_frames >= 100 and self.tesla_stock_longitudinal_active and
+            self._dyn_cooldown_frames == 0 and stock_das_updated):
         self.tesla_stock_longitudinal_active = False
         self._dyn_cooldown_frames = 200
         self._dyn_exit_frames = 0

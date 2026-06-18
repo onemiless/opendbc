@@ -48,6 +48,19 @@ class TeslaCAN:
     }
     return self.packer.make_can_msg("DAS_control", CANBUS.party, values)
 
+  def create_stock_longitudinal_handoff(self, das_control):
+    values = {
+      "DAS_setSpeed": das_control["DAS_setSpeed"],
+      "DAS_accState": das_control["DAS_accState"],
+      "DAS_aebEvent": 3,  # Internal handoff marker; panda safety blocks this frame.
+      "DAS_jerkMin": das_control["DAS_jerkMin"],
+      "DAS_jerkMax": das_control["DAS_jerkMax"],
+      "DAS_accelMin": das_control["DAS_accelMin"],
+      "DAS_accelMax": das_control["DAS_accelMax"],
+      "DAS_controlCounter": das_control["DAS_controlCounter"],
+    }
+    return self.packer.make_can_msg("DAS_control", CANBUS.party, values)
+
   def create_steering_allowed(self):
     values = {
       "APS_eacAllow": 1,

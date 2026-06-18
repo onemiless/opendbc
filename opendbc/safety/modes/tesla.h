@@ -46,16 +46,6 @@ uint8_t tesla_mads_screen_button_fingers = 0U;
 static bool tesla_stock_longitudinal_active = false;
 static uint8_t tesla_prev_touch_points_for_long = 0U;
 static bool tesla_dynamic_auto_stock = false;
-static float tesla_dynamic_auto_stock_high_ms = 80.0 * KPH_TO_MS;
-static float tesla_dynamic_auto_stock_low_ms = 70.0 * KPH_TO_MS;
-static uint8_t tesla_dynamic_auto_stock_enter_frames = 0U;
-static uint8_t tesla_dynamic_auto_stock_exit_frames = 0U;
-static uint8_t tesla_dynamic_auto_stock_cooldown_frames = 0U;
-static bool tesla_stock_das_valid = false;
-static uint16_t tesla_stock_das_set_speed_raw = 4095U;
-static uint16_t tesla_stock_das_accel_min_raw = 511U;
-static uint16_t tesla_stock_das_accel_max_raw = 511U;
-static uint8_t tesla_stock_das_acc_state = 15U;
 
 static uint8_t tesla_get_counter(const CANPacket_t *msg) {
 
@@ -174,35 +164,6 @@ static void tesla_rx_hook(const CANPacket_t *msg) {
       float speed = ((((msg->data[2] << 4) | (msg->data[1] >> 4)) * 0.08) - 40.) * KPH_TO_MS;
       UPDATE_VEHICLE_SPEED(speed);
 
-      if (tesla_dynamic_auto_stock) {
-        if (tesla_dynamic_auto_stock_cooldown_frames > 0U) {
-          tesla_dynamic_auto_stock_cooldown_frames--;
-        }
-
-        int speed_kph10 = ROUND((speed / KPH_TO_MS) * 10.0);
-        int stock_accel_center_centi = ((tesla_stock_das_accel_min_raw + tesla_stock_das_accel_max_raw) * 2) - 1500;
-        bool stock_ready = tesla_stock_das_valid &&
-                           ((tesla_stock_das_acc_state == 2U) || (tesla_stock_das_acc_state == 3U) ||
-                            (tesla_stock_das_acc_state == 4U) || (tesla_stock_das_acc_state == 5U)) &&
-                           (SAFETY_ABS((int)tesla_stock_das_set_speed_raw - speed_kph10) <= 20) &&
-                           (SAFETY_ABS(stock_accel_center_centi) <= 35);
-        bool enter_stock = (speed > tesla_dynamic_auto_stock_high_ms) && stock_ready;
-        bool exit_stock = speed < tesla_dynamic_auto_stock_low_ms;
-        tesla_dynamic_auto_stock_enter_frames = enter_stock ? SAFETY_MIN(tesla_dynamic_auto_stock_enter_frames + 1U, 100U) : 0U;
-        tesla_dynamic_auto_stock_exit_frames = exit_stock ? SAFETY_MIN(tesla_dynamic_auto_stock_exit_frames + 1U, 100U) : 0U;
-
-        if (!tesla_stock_longitudinal_active && (tesla_dynamic_auto_stock_enter_frames >= 50U) && (tesla_dynamic_auto_stock_cooldown_frames == 0U)) {
-          tesla_stock_longitudinal_active = true;
-          tesla_dynamic_auto_stock_cooldown_frames = 100U;
-          tesla_dynamic_auto_stock_enter_frames = 0U;
-        } else if (tesla_stock_longitudinal_active && (tesla_dynamic_auto_stock_exit_frames >= 50U) && (tesla_dynamic_auto_stock_cooldown_frames == 0U)) {
-          tesla_stock_longitudinal_active = false;
-          tesla_dynamic_auto_stock_cooldown_frames = 100U;
-          tesla_dynamic_auto_stock_exit_frames = 0U;
-        } else {
-        }
-      }
-
       // Signal: DI_accelPedalPressed
       gas_pressed = GET_BIT(msg, 34U);
     }
@@ -263,9 +224,6 @@ static void tesla_rx_hook(const CANPacket_t *msg) {
       uint8_t touch_points = msg->data[3];
       if ((tesla_prev_touch_points_for_long != 4U) && (touch_points == 4U)) {
         tesla_stock_longitudinal_active = !tesla_stock_longitudinal_active;
-        tesla_dynamic_auto_stock_cooldown_frames = 100U;
-        tesla_dynamic_auto_stock_enter_frames = 0U;
-        tesla_dynamic_auto_stock_exit_frames = 0U;
       }
       tesla_prev_touch_points_for_long = touch_points;
     }
@@ -276,13 +234,6 @@ static void tesla_rx_hook(const CANPacket_t *msg) {
     if (msg->addr == 0x2b9U) {
       // "AEB_ACTIVE"
       tesla_stock_aeb = (msg->data[2] & 0x03U) == 1U;
-      tesla_stock_das_set_speed_raw = msg->data[0] | ((msg->data[1] & 0x0FU) << 8);
-      tesla_stock_das_acc_state = msg->data[1] >> 4;
-      tesla_stock_das_accel_min_raw = ((msg->data[5] & 0x0FU) << 5) | (msg->data[4] >> 3);
-      tesla_stock_das_accel_max_raw = ((msg->data[6] & 0x1FU) << 4) | (msg->data[5] >> 4);
-      tesla_stock_das_valid = (tesla_stock_das_set_speed_raw != 4095U) &&
-                              (tesla_stock_das_accel_min_raw != 511U) &&
-                              (tesla_stock_das_accel_max_raw != 511U);
     }
 
     // DAS_steeringControl
@@ -358,8 +309,20 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
 
   // DAS_control: longitudinal control message
   if (msg->addr == 0x2b9U) {
-    // No AEB events may be sent by openpilot
     int aeb_event = msg->data[2] & 0x03U;
+
+    // AEB event 3 is reserved as an internal handoff marker. It is always
+    // consumed here and never reaches the vehicle. The first normal OP frame
+    // atomically closes OEM forwarding before it is transmitted.
+    if (tesla_dynamic_auto_stock && (aeb_event == 3)) {
+      tesla_stock_longitudinal_active = true;
+      return false;
+    }
+    if (tesla_dynamic_auto_stock && tesla_stock_longitudinal_active) {
+      tesla_stock_longitudinal_active = false;
+    }
+
+    // No AEB events may be sent by openpilot
     if (aeb_event != 0) {
       violation = true;
     }
@@ -489,9 +452,6 @@ static safety_config tesla_init(uint16_t param) {
   const uint16_t TESLA_PARAM_SP_MADS_SCREEN_BUTTON_4_FINGER = 4;
   const uint16_t TESLA_PARAM_SP_MADS_SCREEN_BUTTON_5_FINGER = 8;
   const uint16_t TESLA_PARAM_SP_DYNAMIC_AUTO_STOCK = 16;
-  const uint16_t TESLA_PARAM_SP_DYNAMIC_AUTO_STOCK_THRESHOLD_MASK = 0x1f;
-  const uint16_t TESLA_PARAM_SP_DYNAMIC_AUTO_STOCK_HIGH_SHIFT = 5;
-  const uint16_t TESLA_PARAM_SP_DYNAMIC_AUTO_STOCK_LOW_SHIFT = 10;
 
   tesla_has_vehicle_bus = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_VEHICLE_BUS);
 
@@ -506,32 +466,12 @@ static safety_config tesla_init(uint16_t param) {
   }
 
   tesla_dynamic_auto_stock = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_DYNAMIC_AUTO_STOCK);
-  uint16_t dynamic_high_kph = (current_safety_param_sp >> TESLA_PARAM_SP_DYNAMIC_AUTO_STOCK_HIGH_SHIFT) & TESLA_PARAM_SP_DYNAMIC_AUTO_STOCK_THRESHOLD_MASK;
-  uint16_t dynamic_low_kph = (current_safety_param_sp >> TESLA_PARAM_SP_DYNAMIC_AUTO_STOCK_LOW_SHIFT) & TESLA_PARAM_SP_DYNAMIC_AUTO_STOCK_THRESHOLD_MASK;
-  dynamic_high_kph *= 5U;
-  dynamic_low_kph *= 5U;
-  if (dynamic_high_kph == 0U) {
-    dynamic_high_kph = 80U;
-  }
-  if ((dynamic_low_kph == 0U) || (dynamic_low_kph >= dynamic_high_kph)) {
-    dynamic_low_kph = dynamic_high_kph - SAFETY_MIN(dynamic_high_kph, 5U);
-  }
-  tesla_dynamic_auto_stock_high_ms = dynamic_high_kph * KPH_TO_MS;
-  tesla_dynamic_auto_stock_low_ms = dynamic_low_kph * KPH_TO_MS;
 
   tesla_stock_aeb = false;
   tesla_stock_steering_control = false;
   tesla_stock_steering_control_prev = false;
   tesla_stock_longitudinal_active = false;
   tesla_prev_touch_points_for_long = 0U;
-  tesla_dynamic_auto_stock_enter_frames = 0U;
-  tesla_dynamic_auto_stock_exit_frames = 0U;
-  tesla_dynamic_auto_stock_cooldown_frames = 0U;
-  tesla_stock_das_valid = false;
-  tesla_stock_das_set_speed_raw = 4095U;
-  tesla_stock_das_accel_min_raw = 511U;
-  tesla_stock_das_accel_max_raw = 511U;
-  tesla_stock_das_acc_state = 15U;
   // we need to assume Autopark/Summon on startup since DI_state is a low freq msg.
   // this is so that we don't fault if starting while these systems are active
   tesla_summon = true;
