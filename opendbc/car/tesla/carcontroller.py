@@ -74,7 +74,7 @@ class CarController(CarControllerBase):
         # SP mode sends OP's own DAS_control. Stock mode lets panda forward the OEM DAS_control.
         if not CS.tesla_stock_longitudinal_active:
           state, accel = self._longitudinal_state_accel(
-            self.leaving_stock_pending, CS.cruiseState.enabled, CC.longActive,
+            self.leaving_stock_pending, self._cruise_enabled(CS), CC.longActive,
             CC.cruiseControl.cancel, actuators.accel,
           )
           cntr = self._next_long_control_counter(CS.das_control["DAS_controlCounter"], self.leaving_stock_pending)
@@ -120,6 +120,10 @@ class CarController(CarControllerBase):
     accel = float(np.clip(requested_accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX)) if long_active else 0.0
     return state, accel
 
+  @staticmethod
+  def _cruise_enabled(CS):
+    return CS.out.cruiseState.enabled
+
   def _log_longitudinal_transition(self, event, CC, CS, **extra):
     das = CS.das_control
     can_payloads = {
@@ -136,7 +140,7 @@ class CarController(CarControllerBase):
       cc_enabled=CC.enabled,
       cc_long_active=CC.longActive,
       cc_cancel=CC.cruiseControl.cancel,
-      cruise_enabled=CS.cruiseState.enabled,
+      cruise_enabled=self._cruise_enabled(CS),
       cruise_override=CS.cruise_override,
       ego_speed=CS.out.vEgo,
       requested_accel=CC.actuators.accel,

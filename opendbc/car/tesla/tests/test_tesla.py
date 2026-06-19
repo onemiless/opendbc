@@ -115,6 +115,10 @@ class TestTeslaFingerprint(unittest.TestCase):
 
 
 class TestTeslaLongitudinalHandoff(unittest.TestCase):
+  def test_controller_reads_cruise_state_from_carstate_output(self):
+    car_state = SimpleNamespace(out=SimpleNamespace(cruiseState=SimpleNamespace(enabled=True)))
+    self.assertTrue(CarController._cruise_enabled(car_state))
+
   def test_dynamic_acc_debug_writes_json_line(self):
     with tempfile.TemporaryDirectory() as temp_dir:
       log_path = Path(temp_dir) / "dynamic_acc_debug.log"
