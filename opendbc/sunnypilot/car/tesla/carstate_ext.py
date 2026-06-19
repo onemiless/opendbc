@@ -14,8 +14,9 @@ from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP
 
 ButtonType = structs.CarState.ButtonEvent.Type
 
-DYNAMIC_STOCK_MAX_SPEED_ERROR_KPH = 2.0
-DYNAMIC_STOCK_MAX_ACCEL_ERROR = 0.35
+DYNAMIC_STOCK_MAX_SPEED_ERROR_KPH = 8.0
+DYNAMIC_STOCK_MAX_ACCEL_ERROR = 0.7
+DYNAMIC_STOCK_MAX_EGO_ACCEL = 0.35
 
 
 class CarStateExt:
@@ -51,6 +52,33 @@ class CarStateExt:
     if self._dyn_low >= self._dyn_high:
       self._dyn_low = max(0, self._dyn_high - 5)
 
+  def _stock_longitudinal_ready(self, ret: structs.CarState, speed_kph: float) -> bool:
+    if ret.brakePressed or ret.gasPressed or not ret.cruiseState.enabled or ret.accFaulted:
+      return False
+
+    das = getattr(self, "das_control", None)
+    if das is None:
+      return False
+
+    stock_set_speed = float(das["DAS_setSpeed"])
+    stock_accel = (float(das["DAS_accelMin"]) + float(das["DAS_accelMax"])) / 2.0
+    stock_acc_active = int(das["DAS_accState"]) in (2, 3, 4, 5)
+    return (stock_acc_active and
+            int(das["DAS_aebEvent"]) == 0 and
+            abs(stock_set_speed - speed_kph) < DYNAMIC_STOCK_MAX_SPEED_ERROR_KPH and
+            abs(stock_accel) < DYNAMIC_STOCK_MAX_ACCEL_ERROR and
+            abs(ret.aEgo) < DYNAMIC_STOCK_MAX_EGO_ACCEL)
+
+  def _toggle_stock_longitudinal_from_touch(self, ret: structs.CarState, speed_kph: float) -> bool:
+    if not self.tesla_stock_longitudinal_active and not self._stock_longitudinal_ready(ret, speed_kph):
+      return False
+
+    self.tesla_stock_longitudinal_active = not self.tesla_stock_longitudinal_active
+    self._dyn_cooldown_frames = 200
+    self._dyn_enter_frames = 0
+    self._dyn_exit_frames = 0
+    return True
+
   def update(self, ret: structs.CarState, ret_sp: structs.CarStateSP, can_parsers: dict[StrEnum, CANParser]) -> None:
     # Auto-stock: use startup params only. Safety receives the same thresholds when the safety mode is set.
     cp_party = can_parsers[Bus.party]
@@ -60,13 +88,8 @@ class CarStateExt:
       stock_counter = int(self.das_control["DAS_controlCounter"])
       stock_das_updated = self._stock_counter_last is None or stock_counter != self._stock_counter_last
       self._stock_counter_last = stock_counter
-      stock_set_speed = float(self.das_control["DAS_setSpeed"])
-      stock_accel = (float(self.das_control["DAS_accelMin"]) + float(self.das_control["DAS_accelMax"])) / 2.0
       stock_acc_active = int(self.das_control["DAS_accState"]) in (2, 3, 4, 5)
-      stock_ready = (stock_acc_active and
-                     int(self.das_control["DAS_aebEvent"]) == 0 and
-                     abs(stock_set_speed - speed_kph) <= DYNAMIC_STOCK_MAX_SPEED_ERROR_KPH and
-                     abs(stock_accel) <= DYNAMIC_STOCK_MAX_ACCEL_ERROR)
+      stock_ready = self._stock_longitudinal_ready(ret, speed_kph)
       enter_stock = speed_kph > self._dyn_high and stock_ready
       exit_stock = speed_kph < self._dyn_low and stock_acc_active and ret.cruiseState.enabled and not ret.brakePressed
 
@@ -103,10 +126,7 @@ class CarStateExt:
       prev_touch_long = self.prev_touch_points_for_long
       self.prev_touch_points_for_long = self.active_touch_points
       if prev_touch_long != 4 and self.active_touch_points == 4:
-        self.tesla_stock_longitudinal_active = not self.tesla_stock_longitudinal_active
-        self._dyn_cooldown_frames = 200
-        self._dyn_enter_frames = 0
-        self._dyn_exit_frames = 0
+        self._toggle_stock_longitudinal_from_touch(ret, speed_kph)
 
     if self.tesla_stock_longitudinal_active:
       ret_sp.flags |= TeslaFlagsSP.STOCK_LONGITUDINAL_ACTIVE.value

@@ -11,6 +11,7 @@ from opendbc.car.tesla.fingerprints import FW_VERSIONS
 from opendbc.car.tesla.radar_interface import RADAR_START_ADDR
 from opendbc.car.tesla.teslacan import TeslaCAN
 from opendbc.car.tesla.values import CAR, FSD_14_FW
+from opendbc.sunnypilot.car.tesla.carstate_ext import CarStateExt
 
 Ecu = CarParams.Ecu
 
@@ -109,6 +110,67 @@ class TestTeslaFingerprint(unittest.TestCase):
 
 
 class TestTeslaLongitudinalHandoff(unittest.TestCase):
+  def _stock_ready(self, *, acc_state=4, set_speed=86.0, speed_kph=80.0,
+                   accel_min=0.2, accel_max=0.6, a_ego=0.2):
+    car_state = CarStateExt.__new__(CarStateExt)
+    car_state.das_control = {
+      "DAS_setSpeed": set_speed,
+      "DAS_accState": acc_state,
+      "DAS_aebEvent": 0,
+      "DAS_accelMin": accel_min,
+      "DAS_accelMax": accel_max,
+    }
+    ret = SimpleNamespace(brakePressed=False, gasPressed=False, accFaulted=False,
+                          aEgo=a_ego, cruiseState=SimpleNamespace(enabled=True))
+    return car_state._stock_longitudinal_ready(ret, speed_kph)
+
+  def _touch_toggle(self, *, initially_stock=False, acc_state=4):
+    car_state = CarStateExt.__new__(CarStateExt)
+    car_state.tesla_stock_longitudinal_active = initially_stock
+    car_state._dyn_cooldown_frames = 0
+    car_state._dyn_enter_frames = 10
+    car_state._dyn_exit_frames = 10
+    car_state.das_control = {
+      "DAS_setSpeed": 80.0,
+      "DAS_accState": acc_state,
+      "DAS_aebEvent": 0,
+      "DAS_accelMin": 0.0,
+      "DAS_accelMax": 0.0,
+    }
+    ret = SimpleNamespace(brakePressed=False, gasPressed=False, accFaulted=False,
+                          aEgo=0.0, cruiseState=SimpleNamespace(enabled=True))
+    changed = car_state._toggle_stock_longitudinal_from_touch(ret, 80.0)
+    return changed, car_state
+
+  def test_stock_handoff_rejects_inactive_oem_acc(self):
+    self.assertFalse(self._stock_ready(acc_state=0, set_speed=80.0, accel_min=0.0, accel_max=0.0))
+    self.assertFalse(self._stock_ready(acc_state=13, set_speed=80.0, accel_min=0.0, accel_max=0.0))
+
+  def test_four_finger_does_not_enter_inactive_oem_acc(self):
+    changed, car_state = self._touch_toggle(acc_state=0)
+    self.assertFalse(changed)
+    self.assertFalse(car_state.tesla_stock_longitudinal_active)
+
+  def test_four_finger_can_enter_ready_oem_acc_and_always_leave(self):
+    changed, car_state = self._touch_toggle(acc_state=4)
+    self.assertTrue(changed)
+    self.assertTrue(car_state.tesla_stock_longitudinal_active)
+    self.assertEqual(200, car_state._dyn_cooldown_frames)
+    self.assertEqual(0, car_state._dyn_enter_frames)
+    self.assertEqual(0, car_state._dyn_exit_frames)
+
+    changed, car_state = self._touch_toggle(initially_stock=True, acc_state=0)
+    self.assertTrue(changed)
+    self.assertFalse(car_state.tesla_stock_longitudinal_active)
+
+  def test_dynamic_stock_handoff_is_reachable_with_matched_demand(self):
+    self.assertTrue(self._stock_ready())
+
+  def test_stock_handoff_rejects_unmatched_demand(self):
+    self.assertFalse(self._stock_ready(set_speed=90.0))
+    self.assertFalse(self._stock_ready(accel_min=0.8, accel_max=1.0))
+    self.assertFalse(self._stock_ready(a_ego=0.5))
+
   def test_counter_resyncs_after_each_stock_period(self):
     controller = CarController.__new__(CarController)
     controller.long_control_counter = None

@@ -434,6 +434,26 @@ class TestTeslaLongitudinalSafety(TestTeslaSafetyBase):
   RELAY_MALFUNCTION_ADDRS = {0: (MSG_DAS_steeringControl, MSG_APS_eacMonitor, MSG_DAS_Control)}
   FWD_BLACKLISTED_ADDRS = {2: [MSG_DAS_steeringControl, MSG_APS_eacMonitor, MSG_DAS_Control]}
 
+  def test_four_finger_requires_python_handoff_decision(self):
+    self.addCleanup(self.safety.set_current_safety_param_sp, 0)
+    self.safety.set_current_safety_param_sp(TeslaSafetyFlagsSP.HAS_VEHICLE_BUS)
+    self.safety.set_safety_hooks(CarParams.SafetyModel.tesla, self.SAFETY_PARAM)
+    self.safety.init_tests()
+    packer_adas = CANPackerSafety("tesla_model3_vehicle")
+    touch = packer_adas.make_can_msg_safety("UI_status2", CANBUS.vehicle, {"UI_activeTouchPoints": 4})
+    handoff = self._long_control_msg(50, acc_state=self.acc_states["ACC_ON"],
+                                     accel_limits=(0, 0), aeb_event=3, bus=0, counter=3)
+
+    self.assertTrue(self._rx(touch))
+    self.assertEqual(-1, self.safety.safety_fwd_hook(2, MSG_DAS_Control))
+    self.assertFalse(self._tx(handoff))
+    self.assertEqual(0, self.safety.safety_fwd_hook(2, MSG_DAS_Control))
+
+    op_cmd = self._long_control_msg(50, acc_state=self.acc_states["ACC_ON"],
+                                    accel_limits=(0, 0), bus=0, counter=4)
+    self.assertTrue(self._tx(op_cmd))
+    self.assertEqual(-1, self.safety.safety_fwd_hook(2, MSG_DAS_Control))
+
   def test_dynamic_stock_handoff_is_atomic(self):
     param_sp = TeslaSafetyFlagsSP.DYNAMIC_AUTO_STOCK
     self.addCleanup(self.safety.set_current_safety_param_sp, 0)

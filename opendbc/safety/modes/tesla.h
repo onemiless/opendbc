@@ -42,9 +42,9 @@ bool tesla_has_vehicle_bus = false;
 extern uint8_t tesla_mads_screen_button_fingers;
 uint8_t tesla_mads_screen_button_fingers = 0U;
 
-// Runtime stock longitudinal toggle via 4-finger touch
+// Runtime stock longitudinal state. Python validates real 4-finger and dynamic
+// requests, then changes this state through a safety-consumed handoff marker.
 static bool tesla_stock_longitudinal_active = false;
-static uint8_t tesla_prev_touch_points_for_long = 0U;
 static bool tesla_dynamic_auto_stock = false;
 
 static uint8_t tesla_get_counter(const CANPacket_t *msg) {
@@ -220,12 +220,6 @@ static void tesla_rx_hook(const CANPacket_t *msg) {
         mads_button_press = (msg->data[3] == tesla_mads_screen_button_fingers) ? MADS_BUTTON_PRESSED : MADS_BUTTON_NOT_PRESSED;
       }
 
-      // 4-finger touch toggles stock longitudinal control (independent of MADS configuration)
-      uint8_t touch_points = msg->data[3];
-      if ((tesla_prev_touch_points_for_long != 4U) && (touch_points == 4U)) {
-        tesla_stock_longitudinal_active = !tesla_stock_longitudinal_active;
-      }
-      tesla_prev_touch_points_for_long = touch_points;
     }
   }
 
@@ -314,11 +308,11 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
     // AEB event 3 is reserved as an internal handoff marker. It is always
     // consumed here and never reaches the vehicle. The first normal OP frame
     // atomically closes OEM forwarding before it is transmitted.
-    if (tesla_dynamic_auto_stock && (aeb_event == 3)) {
+    if ((tesla_has_vehicle_bus || tesla_dynamic_auto_stock) && (aeb_event == 3)) {
       tesla_stock_longitudinal_active = true;
       return false;
     }
-    if (tesla_dynamic_auto_stock && tesla_stock_longitudinal_active) {
+    if (tesla_stock_longitudinal_active) {
       tesla_stock_longitudinal_active = false;
     }
 
@@ -471,7 +465,6 @@ static safety_config tesla_init(uint16_t param) {
   tesla_stock_steering_control = false;
   tesla_stock_steering_control_prev = false;
   tesla_stock_longitudinal_active = false;
-  tesla_prev_touch_points_for_long = 0U;
   // we need to assume Autopark/Summon on startup since DI_state is a low freq msg.
   // this is so that we don't fault if starting while these systems are active
   tesla_summon = true;
