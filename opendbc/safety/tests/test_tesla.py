@@ -480,6 +480,27 @@ class TestTeslaLongitudinalSafety(TestTeslaSafetyBase):
       self.assertTrue(self._tx(op_cmd))
       self.assertEqual(-1, self.safety.safety_fwd_hook(2, MSG_DAS_Control))
 
+  def test_rejected_sp_takeover_keeps_oem_forwarding_open(self):
+    self.addCleanup(self.safety.set_current_safety_param_sp, 0)
+    self.safety.set_current_safety_param_sp(TeslaSafetyFlagsSP.DYNAMIC_AUTO_STOCK)
+    self.safety.set_safety_hooks(CarParams.SafetyModel.tesla, self.SAFETY_PARAM)
+    self.safety.init_tests()
+
+    handoff = self._long_control_msg(50, acc_state=self.acc_states["ACC_ON"],
+                                     accel_limits=(0, 0), aeb_event=3, bus=0, counter=3)
+    rejected_takeover = self._long_control_msg(50, acc_state=self.acc_states["ACC_ON"],
+                                               accel_limits=(1.0, 1.0), bus=0, counter=4)
+    self.assertFalse(self._tx(handoff))
+    self.assertEqual(0, self.safety.safety_fwd_hook(2, MSG_DAS_Control))
+
+    self.safety.set_controls_allowed(False)
+    self.assertFalse(self._tx(rejected_takeover))
+    self.assertEqual(0, self.safety.safety_fwd_hook(2, MSG_DAS_Control))
+
+    self.safety.set_controls_allowed(True)
+    self.assertTrue(self._tx(rejected_takeover))
+    self.assertEqual(-1, self.safety.safety_fwd_hook(2, MSG_DAS_Control))
+
   def test_no_aeb(self):
     for aeb_event in range(4):
       self.assertEqual(self._tx(self._long_control_msg(10, aeb_event=aeb_event)), aeb_event == 0)

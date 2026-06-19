@@ -130,6 +130,8 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
     car_state._dyn_cooldown_frames = 0
     car_state._dyn_enter_frames = 10
     car_state._dyn_exit_frames = 10
+    car_state._dyn_manual_override = False
+    car_state._dyn_manual_saw_sp_off = False
     car_state.das_control = {
       "DAS_setSpeed": 80.0,
       "DAS_accState": acc_state,
@@ -163,6 +165,18 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
     self.assertTrue(changed)
     self.assertFalse(car_state.tesla_stock_longitudinal_active)
 
+  def test_manual_switch_pauses_dynamic_until_sp_is_reenabled(self):
+    changed, car_state = self._touch_toggle(initially_stock=True, acc_state=4)
+    self.assertTrue(changed)
+    self.assertTrue(car_state._dyn_manual_override)
+
+    car_state._update_dynamic_manual_override(cruise_enabled=True)
+    self.assertTrue(car_state._dyn_manual_override)
+    car_state._update_dynamic_manual_override(cruise_enabled=False)
+    self.assertTrue(car_state._dyn_manual_override)
+    car_state._update_dynamic_manual_override(cruise_enabled=True)
+    self.assertFalse(car_state._dyn_manual_override)
+
   def test_dynamic_stock_handoff_is_reachable_with_matched_demand(self):
     self.assertTrue(self._stock_ready())
 
@@ -180,6 +194,20 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
     self.assertEqual(7, controller._next_long_control_counter(6, resync=True))
     self.assertEqual(0, controller._next_long_control_counter(3))
     self.assertEqual(2, controller._next_long_control_counter(1, resync=True))
+
+  def test_inactive_sp_takeover_uses_zero_accel_cancel(self):
+    state, accel = CarController._longitudinal_state_accel(
+      leaving_stock=True, cruise_enabled=True, long_active=False, cancel=False, requested_accel=-1.2,
+    )
+    self.assertEqual(13, state)
+    self.assertEqual(0.0, accel)
+
+  def test_active_sp_takeover_preserves_control(self):
+    state, accel = CarController._longitudinal_state_accel(
+      leaving_stock=True, cruise_enabled=True, long_active=True, cancel=False, requested_accel=-1.2,
+    )
+    self.assertEqual(4, state)
+    self.assertEqual(-1.2, accel)
 
   def test_stock_handoff_uses_blocked_internal_marker(self):
     values = {

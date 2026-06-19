@@ -270,6 +270,7 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
 
   bool tx = true;
   bool violation = false;
+  bool longitudinal_takeover = false;
 
   // Don't send any messages when Autopark is active
   if (tesla_summon) {
@@ -312,9 +313,7 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
       tesla_stock_longitudinal_active = true;
       return false;
     }
-    if (tesla_stock_longitudinal_active) {
-      tesla_stock_longitudinal_active = false;
-    }
+    longitudinal_takeover = tesla_stock_longitudinal_active && (aeb_event == 0);
 
     // No AEB events may be sent by openpilot
     if (aeb_event != 0) {
@@ -333,7 +332,7 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
     if (tesla_longitudinal) {
       // Stock mode echoes Tesla's own DAS_control values via TX channel.
       // These are inherently safe — skip accel checks so hard braking etc. passes.
-      if (!tesla_stock_longitudinal_active) {
+      if (!tesla_stock_longitudinal_active || longitudinal_takeover) {
         // SP mode: OP's own DAS_control — enforce safety limits.
         if ((raw_accel_max < TESLA_LONG_LIMITS.inactive_accel) && (raw_accel_min < TESLA_LONG_LIMITS.inactive_accel)) {
           violation = true;
@@ -378,6 +377,10 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
 
   if (violation) {
     tx = false;
+  }
+
+  if (longitudinal_takeover && tx) {
+    tesla_stock_longitudinal_active = false;
   }
 
   return tx;

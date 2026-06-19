@@ -30,6 +30,8 @@ class CarStateExt:
     self._dyn_enter_frames = 0
     self._dyn_exit_frames = 0
     self._dyn_cooldown_frames = 0
+    self._dyn_manual_override = False
+    self._dyn_manual_saw_sp_off = False
     self._stock_counter_last = None
     self._read_dyn_params()
 
@@ -77,35 +79,29 @@ class CarStateExt:
     self._dyn_cooldown_frames = 200
     self._dyn_enter_frames = 0
     self._dyn_exit_frames = 0
+    self._dyn_manual_override = True
+    self._dyn_manual_saw_sp_off = False
     return True
+
+  def _update_dynamic_manual_override(self, cruise_enabled: bool) -> None:
+    if not self._dyn_manual_override:
+      return
+
+    if not cruise_enabled:
+      self._dyn_manual_saw_sp_off = True
+    elif self._dyn_manual_saw_sp_off:
+      self._dyn_manual_override = False
+      self._dyn_manual_saw_sp_off = False
+      self._dyn_enter_frames = 0
+      self._dyn_exit_frames = 0
 
   def update(self, ret: structs.CarState, ret_sp: structs.CarStateSP, can_parsers: dict[StrEnum, CANParser]) -> None:
     # Auto-stock: use startup params only. Safety receives the same thresholds when the safety mode is set.
     cp_party = can_parsers[Bus.party]
     speed_kph = float(cp_party.vl["DI_speed"]["DI_vehicleSpeed"])
-    if self._dyn_enabled:
-      self._dyn_cooldown_frames = max(0, self._dyn_cooldown_frames - 1)
-      stock_counter = int(self.das_control["DAS_controlCounter"])
-      stock_das_updated = self._stock_counter_last is None or stock_counter != self._stock_counter_last
-      self._stock_counter_last = stock_counter
-      stock_acc_active = int(self.das_control["DAS_accState"]) in (2, 3, 4, 5)
-      stock_ready = self._stock_longitudinal_ready(ret, speed_kph)
-      enter_stock = speed_kph > self._dyn_high and stock_ready
-      exit_stock = speed_kph < self._dyn_low and stock_acc_active and ret.cruiseState.enabled and not ret.brakePressed
 
-      self._dyn_enter_frames = self._dyn_enter_frames + 1 if enter_stock else 0
-      self._dyn_exit_frames = self._dyn_exit_frames + 1 if exit_stock else 0
-
-      if (self._dyn_enter_frames >= 100 and not self.tesla_stock_longitudinal_active and
-          self._dyn_cooldown_frames == 0 and stock_das_updated):
-        self.tesla_stock_longitudinal_active = True
-        self._dyn_cooldown_frames = 200
-        self._dyn_enter_frames = 0
-      elif (self._dyn_exit_frames >= 100 and self.tesla_stock_longitudinal_active and
-            self._dyn_cooldown_frames == 0 and stock_das_updated):
-        self.tesla_stock_longitudinal_active = False
-        self._dyn_cooldown_frames = 200
-        self._dyn_exit_frames = 0
+    # Process the real 4-finger edge before the dynamic state machine so a
+    # manual decision always wins when both happen in the same update.
     if Bus.adas in can_parsers:
       cp_adas = can_parsers[Bus.adas]
 
@@ -122,12 +118,36 @@ class CarStateExt:
         ret.buttonEvents = [*create_button_events(self.active_touch_points, prev_active_touch_points,
                                                   {finger_count: ButtonType.lkas})]
 
-      # 4-finger touch toggles stock longitudinal immediately.
       prev_touch_long = self.prev_touch_points_for_long
       self.prev_touch_points_for_long = self.active_touch_points
       if prev_touch_long != 4 and self.active_touch_points == 4:
         self._toggle_stock_longitudinal_from_touch(ret, speed_kph)
 
+    self._update_dynamic_manual_override(ret.cruiseState.enabled)
+    if self._dyn_enabled:
+      self._dyn_cooldown_frames = max(0, self._dyn_cooldown_frames - 1)
+      stock_counter = int(self.das_control["DAS_controlCounter"])
+      stock_das_updated = self._stock_counter_last is None or stock_counter != self._stock_counter_last
+      self._stock_counter_last = stock_counter
+      stock_acc_active = int(self.das_control["DAS_accState"]) in (2, 3, 4, 5)
+      stock_ready = self._stock_longitudinal_ready(ret, speed_kph)
+      enter_stock = not self._dyn_manual_override and speed_kph > self._dyn_high and stock_ready
+      exit_stock = (not self._dyn_manual_override and speed_kph < self._dyn_low and stock_acc_active and
+                    ret.cruiseState.enabled and not ret.brakePressed)
+
+      self._dyn_enter_frames = self._dyn_enter_frames + 1 if enter_stock else 0
+      self._dyn_exit_frames = self._dyn_exit_frames + 1 if exit_stock else 0
+
+      if (self._dyn_enter_frames >= 100 and not self.tesla_stock_longitudinal_active and
+          self._dyn_cooldown_frames == 0 and stock_das_updated):
+        self.tesla_stock_longitudinal_active = True
+        self._dyn_cooldown_frames = 200
+        self._dyn_enter_frames = 0
+      elif (self._dyn_exit_frames >= 100 and self.tesla_stock_longitudinal_active and
+            self._dyn_cooldown_frames == 0 and stock_das_updated):
+        self.tesla_stock_longitudinal_active = False
+        self._dyn_cooldown_frames = 200
+        self._dyn_exit_frames = 0
     if self.tesla_stock_longitudinal_active:
       ret_sp.flags |= TeslaFlagsSP.STOCK_LONGITUDINAL_ACTIVE.value
     cp_ap_party = can_parsers[Bus.ap_party]

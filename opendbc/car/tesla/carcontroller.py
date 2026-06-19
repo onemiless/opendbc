@@ -66,14 +66,10 @@ class CarController(CarControllerBase):
       if long_control_due or self.leaving_stock_pending:
         # SP mode sends OP's own DAS_control. Stock mode lets panda forward the OEM DAS_control.
         if not CS.tesla_stock_longitudinal_active:
-          # When leaving stock longitudinal back to OP longitudinal, avoid
-          # sending CANCEL even if the state machine is disabled — the car's
-          # ACC is already active and we want a seamless takeover.
-          if self.leaving_stock_pending and CS.cruiseState.enabled:
-            state = 4  # ACC_ON: preserve active cruise during transition
-          else:
-            state = 13 if CC.cruiseControl.cancel else 4  # 4=ACC_ON, 13=ACC_CANCEL_GENERIC_SILENT
-          accel = float(np.clip(actuators.accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
+          state, accel = self._longitudinal_state_accel(
+            self.leaving_stock_pending, CS.cruiseState.enabled, CC.longActive,
+            CC.cruiseControl.cancel, actuators.accel,
+          )
           cntr = self._next_long_control_counter(CS.das_control["DAS_controlCounter"], self.leaving_stock_pending)
           can_sends.append(self.tesla_can.create_longitudinal_command(state, accel, cntr, CS.out.vEgo, CC.longActive, CS.cruise_override))
           self.last_long_control_frame = self.frame
@@ -101,3 +97,10 @@ class CarController(CarControllerBase):
       self.long_control_counter = int(stock_counter)
     self.long_control_counter = (self.long_control_counter + 1) % 8
     return self.long_control_counter
+
+  @staticmethod
+  def _longitudinal_state_accel(leaving_stock, cruise_enabled, long_active, cancel, requested_accel):
+    seamless_takeover = leaving_stock and cruise_enabled and long_active
+    state = 13 if (leaving_stock and not seamless_takeover) or cancel else 4
+    accel = float(np.clip(requested_accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX)) if long_active else 0.0
+    return state, accel
