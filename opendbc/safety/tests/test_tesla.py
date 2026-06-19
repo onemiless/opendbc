@@ -490,6 +490,8 @@ class TestTeslaLongitudinalSafety(TestTeslaSafetyBase):
                                      accel_limits=(0, 0), aeb_event=3, bus=0, counter=3)
     rejected_takeover = self._long_control_msg(50, acc_state=self.acc_states["ACC_ON"],
                                                accel_limits=(1.0, 1.0), bus=0, counter=4)
+    safe_takeover = self._long_control_msg(50, acc_state=self.acc_states["ACC_ON"],
+                                           accel_limits=(0.0, 0.0), bus=0, counter=4)
     self.assertFalse(self._tx(handoff))
     self.assertEqual(0, self.safety.safety_fwd_hook(2, MSG_DAS_Control))
 
@@ -497,8 +499,7 @@ class TestTeslaLongitudinalSafety(TestTeslaSafetyBase):
     self.assertFalse(self._tx(rejected_takeover))
     self.assertEqual(0, self.safety.safety_fwd_hook(2, MSG_DAS_Control))
 
-    self.safety.set_controls_allowed(True)
-    self.assertTrue(self._tx(rejected_takeover))
+    self.assertTrue(self._tx(safe_takeover))
     self.assertEqual(-1, self.safety.safety_fwd_hook(2, MSG_DAS_Control))
 
   def test_no_aeb(self):

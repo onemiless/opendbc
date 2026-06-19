@@ -100,7 +100,9 @@ class CarController(CarControllerBase):
 
   @staticmethod
   def _longitudinal_state_accel(leaving_stock, cruise_enabled, long_active, cancel, requested_accel):
-    seamless_takeover = leaving_stock and cruise_enabled and long_active
-    state = 13 if (leaving_stock and not seamless_takeover) or cancel else 4
+    if leaving_stock:
+      state = 4 if cruise_enabled else 13
+    else:
+      state = 13 if cancel else 4
     accel = float(np.clip(requested_accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX)) if long_active else 0.0
     return state, accel

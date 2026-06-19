@@ -195,9 +195,16 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
     self.assertEqual(0, controller._next_long_control_counter(3))
     self.assertEqual(2, controller._next_long_control_counter(1, resync=True))
 
-  def test_inactive_sp_takeover_uses_zero_accel_cancel(self):
+  def test_inactive_sp_takeover_preserves_enabled_cruise_with_zero_accel(self):
     state, accel = CarController._longitudinal_state_accel(
       leaving_stock=True, cruise_enabled=True, long_active=False, cancel=False, requested_accel=-1.2,
+    )
+    self.assertEqual(4, state)
+    self.assertEqual(0.0, accel)
+
+  def test_sp_takeover_cancels_only_when_cruise_is_disabled(self):
+    state, accel = CarController._longitudinal_state_accel(
+      leaving_stock=True, cruise_enabled=False, long_active=False, cancel=False, requested_accel=-1.2,
     )
     self.assertEqual(13, state)
     self.assertEqual(0.0, accel)
