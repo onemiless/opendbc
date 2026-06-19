@@ -7,6 +7,7 @@ from opendbc.car.tesla.teslacan import TeslaCAN
 from opendbc.car.tesla.values import CarControllerParams
 from opendbc.car.vehicle_model import VehicleModel
 from opendbc.sunnypilot.car.tesla.coop_steering import CoopSteeringCarController
+from opendbc.sunnypilot.car.tesla.dynamic_acc_debug import log_dynamic_acc
 
 
 def get_safety_CP():
@@ -29,6 +30,7 @@ class CarController(CarControllerBase):
     self.leaving_stock_pending = False
     self.long_control_counter = None
     self.last_long_control_frame = -4
+    self.dynamic_acc_debug_followup_frames = 0
     # Vehicle model used for lateral limiting
     self.VM = VehicleModel(get_safety_CP())
 
@@ -57,10 +59,15 @@ class CarController(CarControllerBase):
       if entering_stock:
         # Safety consumes the marker as an internal handoff request; it is never
         # transmitted onto the vehicle bus.
-        can_sends.append(self.tesla_can.create_stock_longitudinal_handoff(CS.das_control))
+        handoff_msg = self.tesla_can.create_stock_longitudinal_handoff(CS.das_control)
+        can_sends.append(handoff_msg)
+        self.dynamic_acc_debug_followup_frames = 100
+        self._log_longitudinal_transition("entering_stock", CC, CS, handoff_msg=handoff_msg)
         self.leaving_stock_pending = False
       elif leaving_stock:
         self.leaving_stock_pending = True
+        self.dynamic_acc_debug_followup_frames = 100
+        self._log_longitudinal_transition("leaving_stock", CC, CS)
 
       long_control_due = (self.frame - self.last_long_control_frame) >= 4
       if long_control_due or self.leaving_stock_pending:
@@ -71,9 +78,15 @@ class CarController(CarControllerBase):
             CC.cruiseControl.cancel, actuators.accel,
           )
           cntr = self._next_long_control_counter(CS.das_control["DAS_controlCounter"], self.leaving_stock_pending)
-          can_sends.append(self.tesla_can.create_longitudinal_command(state, accel, cntr, CS.out.vEgo, CC.longActive, CS.cruise_override))
+          long_msg = self.tesla_can.create_longitudinal_command(state, accel, cntr, CS.out.vEgo, CC.longActive, CS.cruise_override)
+          can_sends.append(long_msg)
+          if self.leaving_stock_pending or self.dynamic_acc_debug_followup_frames > 0:
+            self._log_longitudinal_transition("sp_command", CC, CS, state=state, accel=accel, counter=cntr, long_msg=long_msg)
           self.last_long_control_frame = self.frame
           self.leaving_stock_pending = False
+
+      if self.dynamic_acc_debug_followup_frames > 0:
+        self.dynamic_acc_debug_followup_frames -= 1
 
     else:
       # Increment counter so cancel is prioritized even without openpilot longitudinal
@@ -106,3 +119,33 @@ class CarController(CarControllerBase):
       state = 13 if cancel else 4
     accel = float(np.clip(requested_accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX)) if long_active else 0.0
     return state, accel
+
+  def _log_longitudinal_transition(self, event, CC, CS, **extra):
+    das = CS.das_control
+    can_payloads = {
+      key: value[1].hex() if value is not None else None
+      for key, value in extra.items() if key.endswith("_msg")
+    }
+    values = {key: value for key, value in extra.items() if not key.endswith("_msg")}
+    log_dynamic_acc(
+      "carcontroller", event,
+      frame=self.frame,
+      python_stock_active=CS.tesla_stock_longitudinal_active,
+      previous_stock_active=self.prev_stock_longitudinal,
+      leaving_stock_pending=self.leaving_stock_pending,
+      cc_enabled=CC.enabled,
+      cc_long_active=CC.longActive,
+      cc_cancel=CC.cruiseControl.cancel,
+      cruise_enabled=CS.cruiseState.enabled,
+      cruise_override=CS.cruise_override,
+      ego_speed=CS.out.vEgo,
+      requested_accel=CC.actuators.accel,
+      das_acc_state=das.get("DAS_accState"),
+      das_set_speed=das.get("DAS_setSpeed"),
+      das_accel_min=das.get("DAS_accelMin"),
+      das_accel_max=das.get("DAS_accelMax"),
+      das_aeb_event=das.get("DAS_aebEvent"),
+      das_counter=das.get("DAS_controlCounter"),
+      **values,
+      **can_payloads,
+    )

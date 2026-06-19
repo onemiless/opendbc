@@ -10,6 +10,7 @@ from opendbc.car import Bus, create_button_events, structs
 from opendbc.can.parser import CANParser
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.tesla.values import DBC, CANBUS
+from opendbc.sunnypilot.car.tesla.dynamic_acc_debug import log_dynamic_acc
 from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP
 
 ButtonType = structs.CarState.ButtonEvent.Type
@@ -32,6 +33,7 @@ class CarStateExt:
     self._dyn_cooldown_frames = 0
     self._dyn_manual_override = False
     self._dyn_manual_saw_sp_off = False
+    self._dyn_debug_followup_frames = 0
     self._stock_counter_last = None
     self._read_dyn_params()
 
@@ -73,15 +75,46 @@ class CarStateExt:
 
   def _toggle_stock_longitudinal_from_touch(self, ret: structs.CarState, speed_kph: float) -> bool:
     if not self.tesla_stock_longitudinal_active and not self._stock_longitudinal_ready(ret, speed_kph):
+      self._log_dynamic_state("manual_rejected", ret, speed_kph)
       return False
 
+    previous_state = self.tesla_stock_longitudinal_active
     self.tesla_stock_longitudinal_active = not self.tesla_stock_longitudinal_active
     self._dyn_cooldown_frames = 200
     self._dyn_enter_frames = 0
     self._dyn_exit_frames = 0
     self._dyn_manual_override = True
     self._dyn_manual_saw_sp_off = False
+    self._dyn_debug_followup_frames = 200
+    self._log_dynamic_state("manual_toggle", ret, speed_kph, previous_state=previous_state)
     return True
+
+  def _log_dynamic_state(self, event: str, ret: structs.CarState, speed_kph: float, **extra) -> None:
+    das = getattr(self, "das_control", {})
+    log_dynamic_acc(
+      "carstate_ext", event,
+      stock_active=self.tesla_stock_longitudinal_active,
+      dynamic_enabled=getattr(self, "_dyn_enabled", False),
+      manual_override=self._dyn_manual_override,
+      manual_saw_sp_off=self._dyn_manual_saw_sp_off,
+      speed_kph=speed_kph,
+      cruise_enabled=ret.cruiseState.enabled,
+      cruise_available=getattr(ret.cruiseState, "available", False),
+      brake_pressed=ret.brakePressed,
+      gas_pressed=ret.gasPressed,
+      acc_faulted=ret.accFaulted,
+      ego_accel=ret.aEgo,
+      das_acc_state=das.get("DAS_accState"),
+      das_set_speed=das.get("DAS_setSpeed"),
+      das_accel_min=das.get("DAS_accelMin"),
+      das_accel_max=das.get("DAS_accelMax"),
+      das_aeb_event=das.get("DAS_aebEvent"),
+      das_counter=das.get("DAS_controlCounter"),
+      dyn_enter_frames=self._dyn_enter_frames,
+      dyn_exit_frames=self._dyn_exit_frames,
+      dyn_cooldown_frames=self._dyn_cooldown_frames,
+      **extra,
+    )
 
   def _update_dynamic_manual_override(self, cruise_enabled: bool) -> None:
     if not self._dyn_manual_override:
@@ -94,6 +127,7 @@ class CarStateExt:
       self._dyn_manual_saw_sp_off = False
       self._dyn_enter_frames = 0
       self._dyn_exit_frames = 0
+      log_dynamic_acc("carstate_ext", "manual_override_rearmed")
 
   def update(self, ret: structs.CarState, ret_sp: structs.CarStateSP, can_parsers: dict[StrEnum, CANParser]) -> None:
     # Auto-stock: use startup params only. Safety receives the same thresholds when the safety mode is set.
@@ -143,11 +177,20 @@ class CarStateExt:
         self.tesla_stock_longitudinal_active = True
         self._dyn_cooldown_frames = 200
         self._dyn_enter_frames = 0
+        self._dyn_debug_followup_frames = 200
+        self._log_dynamic_state("dynamic_enter_stock", ret, speed_kph)
       elif (self._dyn_exit_frames >= 100 and self.tesla_stock_longitudinal_active and
             self._dyn_cooldown_frames == 0 and stock_das_updated):
         self.tesla_stock_longitudinal_active = False
         self._dyn_cooldown_frames = 200
         self._dyn_exit_frames = 0
+        self._dyn_debug_followup_frames = 200
+        self._log_dynamic_state("dynamic_exit_stock", ret, speed_kph)
+
+    if self._dyn_debug_followup_frames > 0:
+      if self._dyn_debug_followup_frames % 25 == 0:
+        self._log_dynamic_state("followup", ret, speed_kph, remaining_frames=self._dyn_debug_followup_frames)
+      self._dyn_debug_followup_frames -= 1
     if self.tesla_stock_longitudinal_active:
       ret_sp.flags |= TeslaFlagsSP.STOCK_LONGITUDINAL_ACTIVE.value
     cp_ap_party = can_parsers[Bus.ap_party]

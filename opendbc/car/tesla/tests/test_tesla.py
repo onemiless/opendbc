@@ -1,6 +1,10 @@
+import json
 import re
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from opendbc.can import CANPacker
 from opendbc.car import gen_empty_fingerprint
@@ -12,6 +16,7 @@ from opendbc.car.tesla.radar_interface import RADAR_START_ADDR
 from opendbc.car.tesla.teslacan import TeslaCAN
 from opendbc.car.tesla.values import CAR, FSD_14_FW
 from opendbc.sunnypilot.car.tesla.carstate_ext import CarStateExt
+from opendbc.sunnypilot.car.tesla import dynamic_acc_debug
 
 Ecu = CarParams.Ecu
 
@@ -110,6 +115,14 @@ class TestTeslaFingerprint(unittest.TestCase):
 
 
 class TestTeslaLongitudinalHandoff(unittest.TestCase):
+  def test_dynamic_acc_debug_writes_json_line(self):
+    with tempfile.TemporaryDirectory() as temp_dir:
+      log_path = Path(temp_dir) / "dynamic_acc_debug.log"
+      with patch.object(dynamic_acc_debug, "DYNAMIC_ACC_DEBUG_PATH", str(log_path)):
+        dynamic_acc_debug._append_dynamic_acc_debug({"source": "test", "event": "handoff"})
+
+      self.assertEqual({"event": "handoff", "source": "test"}, json.loads(log_path.read_text()))
+
   def _stock_ready(self, *, acc_state=4, set_speed=86.0, speed_kph=80.0,
                    accel_min=0.2, accel_max=0.6, a_ego=0.2):
     car_state = CarStateExt.__new__(CarStateExt)
