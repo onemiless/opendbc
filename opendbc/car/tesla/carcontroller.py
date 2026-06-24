@@ -8,6 +8,7 @@ from opendbc.car.tesla.values import CarControllerParams
 from opendbc.car.vehicle_model import VehicleModel
 from opendbc.sunnypilot.car.tesla.coop_steering import CoopSteeringCarController
 from opendbc.sunnypilot.car.tesla.dynamic_acc_debug import log_dynamic_acc
+from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP
 
 
 def get_safety_CP():
@@ -33,6 +34,10 @@ class CarController(CarControllerBase):
     self.dynamic_acc_debug_followup_frames = 0
     # Vehicle model used for lateral limiting
     self.VM = VehicleModel(get_safety_CP())
+    self.nav_blinker_control_enabled = bool(CP_SP.flags & TeslaFlagsSP.NAV_BLINKER_CONTROL)
+    self.body_controls_counter_last = -1
+    self.blinker_request_prev = False
+    self.blinker_cancel_frame = 0
 
   def update(self, CC, CC_SP, CS, now_nanos):
     actuators = CC.actuators
@@ -93,6 +98,32 @@ class CarController(CarControllerBase):
       if CC.cruiseControl.cancel:
         cntr = (CS.das_control["DAS_controlCounter"] + 1) % 8
         can_sends.append(self.tesla_can.create_longitudinal_command(13, 0, cntr, CS.out.vEgo, False, True))
+
+    # Nav/automation blinker control via DAS_bodyControls on the vehicle bus.
+    # Copy the stock frame, override only the turn-indicator request bits, and
+    # send counter + 1 so the body controller accepts our frame after the OEM one.
+    #
+    # This is deliberately gated by TeslaNavBlinkerControl and raw stock-frame presence.
+    # A later navigation integration only needs to drive CC.leftBlinker/rightBlinker.
+    stock_dat = getattr(CS, "das_body_controls_dat", b"")
+    if self.nav_blinker_control_enabled and len(stock_dat) >= 8:
+      left_blinker = CC.leftBlinker
+      right_blinker = CC.rightBlinker
+
+      driver_opposes = (left_blinker and CS.out.rightBlinker) or (right_blinker and CS.out.leftBlinker)
+      if driver_opposes:
+        left_blinker = right_blinker = False
+
+      blinker_requesting = left_blinker or right_blinker
+      if self.blinker_request_prev and not blinker_requesting and not driver_opposes:
+        self.blinker_cancel_frame = self.frame + 150  # ~1.5 s
+      self.blinker_request_prev = blinker_requesting
+      cancel = not blinker_requesting and not driver_opposes and self.frame < self.blinker_cancel_frame
+
+      body_counter = stock_dat[6] >> 4
+      if body_counter != self.body_controls_counter_last:
+        can_sends.append(self.tesla_can.create_body_controls(stock_dat, left_blinker, right_blinker, cancel))
+      self.body_controls_counter_last = body_counter
 
     # TODO: HUD control
     new_actuators = actuators.as_builder()

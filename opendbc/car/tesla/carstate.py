@@ -8,6 +8,7 @@ from opendbc.car.tesla.teslacan import get_steer_ctrl_type
 from opendbc.car.tesla.values import DBC, CANBUS, GEAR_MAP, STEER_DISENGAGE_THRESHOLD, STEER_THRESHOLD, TeslaFlags
 
 from opendbc.sunnypilot.car.tesla.carstate_ext import CarStateExt
+from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP
 
 ButtonType = structs.CarState.ButtonEvent.Type
 STEERING_KNUCKLE_ARM_LENGTH_M = 0.11
@@ -30,6 +31,7 @@ class CarState(CarStateBase, CarStateExt):
     self.hands_on_level = 0
     self.prev_acc_state = 0
     self.das_control = None
+    self.das_body_controls_dat = b""
 
   def update_summon_state(self, summon_state: str, cruise_enabled: bool):
     summon_now = summon_state in ("ACTIVE", "COMPLETE", "SELFPARK_STARTED")
@@ -170,6 +172,8 @@ class CarState(CarStateBase, CarStateExt):
 
     # Messages needed by carcontroller
     self.das_control = copy.copy(cp_ap_party.vl["DAS_control"])
+    if Bus.cam in can_parsers:
+      self.das_body_controls_dat = bytes(can_parsers[Bus.cam].dat.get(0x3E9, b""))
 
     CarStateExt.update(self, ret, ret_sp, can_parsers)
 
@@ -177,8 +181,11 @@ class CarState(CarStateBase, CarStateExt):
 
   @staticmethod
   def get_can_parsers(CP, CP_SP):
-    return {
+    parsers = {
       Bus.party: CANParser(DBC[CP.carFingerprint][Bus.party], [], CANBUS.party),
       Bus.ap_party: CANParser(DBC[CP.carFingerprint][Bus.party], [], CANBUS.autopilot_party),
       **CarStateExt.get_parser(CP, CP_SP),
     }
+    if CP_SP.flags & TeslaFlagsSP.HAS_VEHICLE_BUS and Bus.adas in DBC[CP.carFingerprint]:
+      parsers[Bus.cam] = CANParser(DBC[CP.carFingerprint][Bus.adas], [("DAS_bodyControls", 2)], CANBUS.autopilot_party)
+    return parsers

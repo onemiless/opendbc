@@ -15,6 +15,7 @@ class TeslaFlagsSP(IntFlag):
   MADS_SCREEN_BUTTON_5_FINGER = 16
   STOCK_LONGITUDINAL_ACTIVE = 32  # Runtime toggle: 4-finger touch switches to stock (OEM) longitudinal control
   DYNAMIC_AUTO_STOCK = 64
+  NAV_BLINKER_CONTROL = 128
 
 
 class MadsScreenButtonType:

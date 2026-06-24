@@ -249,3 +249,27 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
     aeb_event = actual[2] & 0x03
 
     self.assertEqual(3, aeb_event)
+
+  def test_body_controls_left_blinker_updates_only_request_bits_counter_and_checksum(self):
+    stock_dat = bytes([0x12, 0xF8, 0xC3, 0x45, 0x67, 0x89, 0xA5, 0x00])
+    tesla_can = TeslaCAN(SimpleNamespace(flags=0), CANPacker("tesla_model3_party"))
+
+    addr, dat, bus = tesla_can.create_body_controls(stock_dat, True, False)
+
+    self.assertEqual(0x3E9, addr)
+    self.assertEqual(1, bus)
+    self.assertEqual(1, dat[1] & 0x07)
+    self.assertEqual(1 << 2, dat[2] & 0x3C)
+    self.assertEqual(0xB, dat[6] >> 4)
+    self.assertEqual(stock_dat[6] & 0x0F, dat[6] & 0x0F)
+    self.assertEqual(((addr & 0xFF) + ((addr >> 8) & 0xFF) + sum(dat[:7])) & 0xFF, dat[7])
+
+  def test_body_controls_cancel_sets_cancel_request(self):
+    stock_dat = bytes([0x12, 0xF8, 0xC3, 0x45, 0x67, 0x89, 0xF5, 0x00])
+    tesla_can = TeslaCAN(SimpleNamespace(flags=0), CANPacker("tesla_model3_party"))
+
+    _, dat, _ = tesla_can.create_body_controls(stock_dat, False, False, cancel=True)
+
+    self.assertEqual(0x03, dat[1] & 0x07)
+    self.assertEqual(4 << 2, dat[2] & 0x3C)
+    self.assertEqual(0x0, dat[6] >> 4)
