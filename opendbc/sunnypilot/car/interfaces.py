@@ -87,6 +87,7 @@ def setup_interfaces(CI, CP: structs.CarParams, CP_SP: structs.CarParamsSP,
   _initialize_coop_steering(CP, CP_SP, params_dict)
   _initialize_tesla_mads_screen_button(CP, CP_SP, params_dict)
   _initialize_tesla_dynamic_auto_stock(CP, CP_SP, params_dict)
+  _initialize_tesla_speed_limit_cruise_buttons(CP, CP_SP, params_dict)
   _initialize_radar_tracks(CP, CP_SP, can_recv, can_send)
   _initialize_stop_and_go(CP, CP_SP, params_dict)
   _initialize_toyota(CP, CP_SP, params_dict)
@@ -147,6 +148,16 @@ def _initialize_tesla_dynamic_auto_stock(CP: structs.CarParams, CP_SP: structs.C
       CP_SP.safetyParam |= TeslaSafetyFlagsSP.DYNAMIC_AUTO_STOCK
       CP_SP.safetyParam |= (high_kph // 5) << TeslaSafetyFlagsSP.DYNAMIC_AUTO_STOCK_HIGH_SHIFT
       CP_SP.safetyParam |= (low_kph // 5) << TeslaSafetyFlagsSP.DYNAMIC_AUTO_STOCK_LOW_SHIFT
+
+
+def _initialize_tesla_speed_limit_cruise_buttons(CP: structs.CarParams, CP_SP: structs.CarParamsSP,
+                                                 params_dict: dict[str, str]) -> None:
+  if CP.brand == 'tesla' and CP_SP.flags & TeslaFlagsSP.HAS_VEHICLE_BUS:
+    speed_limit_cruise_buttons = int(params_dict.get("TeslaSpeedLimitCruiseButtons", 0)) == 1
+    if speed_limit_cruise_buttons:
+      CP_SP.flags |= TeslaFlagsSP.SPEED_LIMIT_CRUISE_BUTTONS.value
+      CP_SP.safetyParam |= TeslaSafetyFlagsSP.SPEED_LIMIT_CRUISE_BUTTONS
+      CP_SP.intelligentCruiseButtonManagementAvailable = True
 
 
 def _initialize_radar_tracks(CP: structs.CarParams, CP_SP: structs.CarParamsSP,

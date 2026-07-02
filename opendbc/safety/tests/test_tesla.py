@@ -19,6 +19,7 @@ from opendbc.sunnypilot.car.tesla.values import TeslaSafetyFlagsSP
 MSG_DAS_steeringControl = 0x488
 MSG_APS_eacMonitor = 0x27d
 MSG_DAS_Control = 0x2b9
+MSG_STW_ACTN_RQ = 0x238
 
 
 def round_angle(apply_angle, can_offset=0):
@@ -33,7 +34,7 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
 
   RELAY_MALFUNCTION_ADDRS = {0: (MSG_DAS_steeringControl, MSG_APS_eacMonitor)}
   FWD_BLACKLISTED_ADDRS = {2: [MSG_DAS_steeringControl, MSG_APS_eacMonitor]}
-  TX_MSGS = [[MSG_DAS_steeringControl, 0], [MSG_APS_eacMonitor, 0], [MSG_DAS_Control, 0]]
+  TX_MSGS = [[MSG_DAS_steeringControl, 0], [MSG_APS_eacMonitor, 0], [MSG_DAS_Control, 0], [MSG_STW_ACTN_RQ, CANBUS.vehicle]]
 
   STANDSTILL_THRESHOLD = 0.1
   GAS_PRESSED_THRESHOLD = 3
@@ -67,6 +68,7 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
   def setUp(self):
     self.VM = VehicleModel(get_safety_CP())
     self.packer = CANPackerSafety("tesla_model3_party")
+    self.packer_adas = CANPackerSafety("tesla_model3_vehicle")
     self.define = CANDefine("tesla_model3_party")
     self.acc_states = {d: v for v, d in self.define.dv["DAS_control"]["DAS_accState"].items()}
     self.autopark_states = {d: v for v, d in self.define.dv["DI_state"]["DI_autoparkState"].items()}
@@ -141,6 +143,41 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
     if counter is not None:
       values["DAS_controlCounter"] = counter
     return self.packer.make_can_msg_safety("DAS_control", bus, values)
+
+  def _stw_action_msg(self, speed_control_state=0, counter=0, bus=CANBUS.vehicle, values=None):
+    msg_values = {
+      "SpdCtrlLvr_Stat": speed_control_state,
+      "SpdCtrlLvrStat_Inv": 0,
+      "DTR_Dist_Rq": 0,
+      "MC_STW_ACTN_RQ": counter,
+    }
+    if values is not None:
+      msg_values.update(values)
+    return self.packer_adas.make_can_msg_safety("STW_ACTN_RQ", bus, msg_values)
+
+  def test_stw_action_request_requires_speed_limit_cruise_button_flag(self):
+    for speed_control_state in (0, 16, 32):
+      with self.subTest(speed_control_state=speed_control_state):
+        self.assertFalse(self._tx(self._stw_action_msg(speed_control_state=speed_control_state)))
+
+  def test_stw_action_request_speed_limit_cruise_buttons(self):
+    self.addCleanup(self.safety.set_current_safety_param_sp, 0)
+    self.safety.set_current_safety_param_sp(TeslaSafetyFlagsSP.SPEED_LIMIT_CRUISE_BUTTONS)
+    self.safety.set_safety_hooks(CarParams.SafetyModel.tesla, self.SAFETY_PARAM)
+    self.safety.init_tests()
+
+    for speed_control_state in (0, 16, 32):
+      with self.subTest(speed_control_state=speed_control_state):
+        self.assertTrue(self._tx(self._stw_action_msg(speed_control_state=speed_control_state)))
+
+    for speed_control_state in (1, 2, 4, 8):
+      with self.subTest(speed_control_state=speed_control_state):
+        self.assertFalse(self._tx(self._stw_action_msg(speed_control_state=speed_control_state)))
+
+    self.assertFalse(self._tx(self._stw_action_msg(16, values={"DTR_Dist_Rq": 33})))
+    bad_checksum = self._stw_action_msg(16)
+    bad_checksum[0].data[7] ^= 0xFF
+    self.assertFalse(self._tx(bad_checksum))
 
   def _accel_msg(self, accel: float):
     # For common.LongitudinalAccelSafetyTest

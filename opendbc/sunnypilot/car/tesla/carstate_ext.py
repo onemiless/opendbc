@@ -149,8 +149,10 @@ class CarStateExt:
         finger_count = 5
 
       if finger_count is not None:
-        ret.buttonEvents = [*create_button_events(self.active_touch_points, prev_active_touch_points,
-                                                  {finger_count: ButtonType.lkas})]
+        ret.buttonEvents = [
+          *ret.buttonEvents,
+          *create_button_events(self.active_touch_points, prev_active_touch_points, {finger_count: ButtonType.lkas}),
+        ]
 
       prev_touch_long = self.prev_touch_points_for_long
       self.prev_touch_points_for_long = self.active_touch_points

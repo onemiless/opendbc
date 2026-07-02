@@ -14,7 +14,7 @@ from opendbc.car.tesla.interface import CarInterface
 from opendbc.car.tesla.fingerprints import FW_VERSIONS
 from opendbc.car.tesla.radar_interface import RADAR_START_ADDR
 from opendbc.car.tesla.teslacan import TeslaCAN
-from opendbc.car.tesla.values import CAR, FSD_14_FW
+from opendbc.car.tesla.values import CANBUS, CAR, FSD_14_FW
 from opendbc.sunnypilot.car.tesla.carstate_ext import CarStateExt
 from opendbc.sunnypilot.car.tesla import dynamic_acc_debug
 
@@ -249,3 +249,13 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
     aeb_event = actual[2] & 0x03
 
     self.assertEqual(3, aeb_event)
+
+  def test_stw_action_request(self):
+    tesla_can = TeslaCAN(SimpleNamespace(flags=0), CANPacker("tesla_model3_party"), CANPacker("tesla_model3_vehicle"))
+
+    addr, dat, bus = tesla_can.create_stw_action_request(16, 7)
+
+    self.assertEqual(0x238, addr)
+    self.assertEqual(CANBUS.vehicle, bus)
+    self.assertEqual(16, dat[0] & 0x3F)
+    self.assertEqual(7, dat[6] >> 4)

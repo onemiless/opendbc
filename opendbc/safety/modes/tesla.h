@@ -46,6 +46,7 @@ uint8_t tesla_mads_screen_button_fingers = 0U;
 // requests, then changes this state through a safety-consumed handoff marker.
 static bool tesla_stock_longitudinal_active = false;
 static bool tesla_dynamic_auto_stock = false;
+static bool tesla_speed_limit_cruise_buttons = false;
 
 static uint8_t tesla_get_counter(const CANPacket_t *msg) {
 
@@ -78,6 +79,9 @@ static int _tesla_get_checksum_byte(const int addr) {
   } else if (addr == 0x488) {
     // Signal: DAS_steeringControlChecksum
     checksum_byte = 3;
+  } else if (addr == 0x238) {
+    // Signal: CRC_STW_ACTN_RQ
+    checksum_byte = 7;
   } else if ((addr == 0x257) || (addr == 0x145) || (addr == 0x286) || (addr == 0x311)) {
     // Signal: DI_speedChecksum, ESP_statusChecksum, DI_locStatusChecksum, UI_warningChecksum
     checksum_byte = 0;
@@ -353,6 +357,26 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
     }
   }
 
+  // STW_ACTN_RQ: speed-control lever emulation for Tesla speed limit cruise buttons.
+  if (msg->addr == 0x238U) {
+    int speed_control_state = msg->data[0] & 0x3FU;
+    bool valid_speed_button = (speed_control_state == 0) ||   // IDLE
+                              (speed_control_state == 16) ||  // UP_1ST
+                              (speed_control_state == 32);    // DN_1ST
+    bool other_fields_clear = ((msg->data[0] & 0xC0U) == 0U) &&
+                              (msg->data[1] == 0U) &&
+                              (msg->data[2] == 0U) &&
+                              (msg->data[3] == 0U) &&
+                              (msg->data[4] == 0U) &&
+                              (msg->data[5] == 0U) &&
+                              ((msg->data[6] & 0x0FU) == 0U);
+    uint8_t chksum = tesla_compute_checksum(msg);
+    if (!tesla_speed_limit_cruise_buttons || !valid_speed_button || !other_fields_clear ||
+        (chksum != tesla_get_checksum(msg))) {
+      violation = true;
+    }
+  }
+
   // Extra TX messages: basic safety checks
   if (msg->addr == 0x370U) {
     // Nag killer echo: verify checksum
@@ -423,6 +447,7 @@ static safety_config tesla_init(uint16_t param) {
     {0x370, 0, 8, .check_relay = false, .disable_static_blocking = true},  // EPAS3S_sysStatus (nag killer)
     {0x399, 0, 8, .check_relay = false, .disable_static_blocking = true},  // ISA speed chime suppress
     {0x249, 0, 3, .check_relay = false, .disable_static_blocking = true},  // SCCM_leftStalk (turn signal)
+    {0x238, 1, 8, .check_relay = false, .disable_static_blocking = true},  // STW_ACTN_RQ (speed control)
   };
 
   static const CanMsg TESLA_M3_Y_LONG_TX_MSGS[] = {
@@ -434,6 +459,7 @@ static safety_config tesla_init(uint16_t param) {
     {0x370, 0, 8, .check_relay = false, .disable_static_blocking = true}, // EPAS3S_sysStatus (nag killer)
     {0x399, 0, 8, .check_relay = false, .disable_static_blocking = true}, // ISA speed chime suppress
     {0x249, 0, 3, .check_relay = false, .disable_static_blocking = true}, // SCCM_leftStalk (turn signal)
+    {0x238, 1, 8, .check_relay = false, .disable_static_blocking = true}, // STW_ACTN_RQ (speed control)
   };
 
   const uint16_t TESLA_FLAG_FSD_14 = 2;
@@ -449,6 +475,7 @@ static safety_config tesla_init(uint16_t param) {
   const uint16_t TESLA_PARAM_SP_MADS_SCREEN_BUTTON_4_FINGER = 4;
   const uint16_t TESLA_PARAM_SP_MADS_SCREEN_BUTTON_5_FINGER = 8;
   const uint16_t TESLA_PARAM_SP_DYNAMIC_AUTO_STOCK = 16;
+  const uint16_t TESLA_PARAM_SP_SPEED_LIMIT_CRUISE_BUTTONS = 32;
 
   tesla_has_vehicle_bus = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_VEHICLE_BUS);
 
@@ -463,6 +490,7 @@ static safety_config tesla_init(uint16_t param) {
   }
 
   tesla_dynamic_auto_stock = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_DYNAMIC_AUTO_STOCK);
+  tesla_speed_limit_cruise_buttons = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_SPEED_LIMIT_CRUISE_BUTTONS);
 
   tesla_stock_aeb = false;
   tesla_stock_steering_control = false;

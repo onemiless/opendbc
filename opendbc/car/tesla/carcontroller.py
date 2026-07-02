@@ -8,6 +8,7 @@ from opendbc.car.tesla.values import CarControllerParams
 from opendbc.car.vehicle_model import VehicleModel
 from opendbc.sunnypilot.car.tesla.coop_steering import CoopSteeringCarController
 from opendbc.sunnypilot.car.tesla.dynamic_acc_debug import log_dynamic_acc
+from opendbc.sunnypilot.car.tesla.icbm import IntelligentCruiseButtonManagementInterface
 
 
 def get_safety_CP():
@@ -17,13 +18,15 @@ def get_safety_CP():
   return CarInterface.get_non_essential_params("TESLA_MODEL_Y")
 
 
-class CarController(CarControllerBase):
+class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterface):
   def __init__(self, dbc_names, CP, CP_SP):
     CarControllerBase.__init__(self, dbc_names, CP, CP_SP)
+    IntelligentCruiseButtonManagementInterface.__init__(self, CP, CP_SP)
     self.coop_steer = CoopSteeringCarController()
     self.apply_angle_last = 0
     self.packer = CANPacker(dbc_names[Bus.party])
-    self.tesla_can = TeslaCAN(CP, self.packer)
+    self.vehicle_packer = CANPacker(dbc_names[Bus.adas])
+    self.tesla_can = TeslaCAN(CP, self.packer, self.vehicle_packer)
 
     # Track longitudinal source transitions independently of the 25 Hz TX phase.
     self.prev_stock_longitudinal = False
@@ -94,6 +97,8 @@ class CarController(CarControllerBase):
         cntr = (CS.das_control["DAS_controlCounter"] + 1) % 8
         can_sends.append(self.tesla_can.create_longitudinal_command(13, 0, cntr, CS.out.vEgo, False, True))
 
+    can_sends.extend(IntelligentCruiseButtonManagementInterface.update(
+      self, CC_SP, CS, self.tesla_can, self.frame, self.last_button_frame))
     # TODO: HUD control
     new_actuators = actuators.as_builder()
     new_actuators.steeringAngleDeg = self.apply_angle_last

@@ -29,7 +29,9 @@ class CarState(CarStateBase, CarStateExt):
 
     self.hands_on_level = 0
     self.prev_acc_state = 0
+    self.prev_speed_control_state = 0
     self.das_control = None
+    self.stw_action_counter = 0
 
   def update_summon_state(self, summon_state: str, cruise_enabled: bool):
     summon_now = summon_state in ("ACTIVE", "COMPLETE", "SELFPARK_STARTED")
@@ -111,7 +113,7 @@ class CarState(CarStateBase, CarStateExt):
     ret.accFaulted = cruise_state == "FAULT"
 
     acc_state = cp_ap_party.vl["DAS_control"]["DAS_accState"]
-    ret.buttonEvents = [
+    button_events = [
       *create_button_events(
         acc_state,
         self.prev_acc_state,
@@ -119,6 +121,27 @@ class CarState(CarStateBase, CarStateExt):
       ),
     ]
     self.prev_acc_state = acc_state
+
+    if Bus.adas in can_parsers:
+      try:
+        stw_action = can_parsers[Bus.adas].vl["STW_ACTN_RQ"]
+        speed_control_state = int(stw_action["SpdCtrlLvr_Stat"])
+        button_events.extend(create_button_events(
+          speed_control_state,
+          self.prev_speed_control_state,
+          {
+            4: ButtonType.accelCruise,   # UP_2ND
+            16: ButtonType.accelCruise,  # UP_1ST
+            8: ButtonType.decelCruise,   # DN_2ND
+            32: ButtonType.decelCruise,  # DN_1ST
+          },
+        ))
+        self.prev_speed_control_state = speed_control_state
+        self.stw_action_counter = int(stw_action["MC_STW_ACTN_RQ"])
+      except Exception:
+        pass
+
+    ret.buttonEvents = button_events
 
     # Gear
     ret.gearShifter = GEAR_MAP[self.can_define.dv["DI_systemStatus"]["DI_gear"].get(int(cp_party.vl["DI_systemStatus"]["DI_gear"]), "DI_GEAR_INVALID")]

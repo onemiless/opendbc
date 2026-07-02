@@ -12,9 +12,10 @@ def get_steer_ctrl_type(flags: int, ctrl_type: int) -> int:
 
 
 class TeslaCAN:
-  def __init__(self, CP, packer):
+  def __init__(self, CP, packer, vehicle_packer=None):
     self.CP = CP
     self.packer = packer
+    self.vehicle_packer = vehicle_packer
     self.jerk = 0.0
 
   def create_steering_control(self, angle, enabled):
@@ -60,6 +61,15 @@ class TeslaCAN:
       "DAS_controlCounter": das_control["DAS_controlCounter"],
     }
     return self.packer.make_can_msg("DAS_control", CANBUS.party, values)
+
+  def create_stw_action_request(self, speed_control_state, counter):
+    values = {
+      "SpdCtrlLvr_Stat": speed_control_state,
+      "SpdCtrlLvrStat_Inv": 0,
+      "DTR_Dist_Rq": 0,
+      "MC_STW_ACTN_RQ": counter,
+    }
+    return self.vehicle_packer.make_can_msg("STW_ACTN_RQ", CANBUS.vehicle, values)
 
   def create_steering_allowed(self):
     values = {
