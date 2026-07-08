@@ -127,7 +127,7 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
 
       self.assertEqual({"event": "handoff", "source": "test"}, json.loads(log_path.read_text()))
 
-  def _stock_ready(self, *, acc_state=4, set_speed=86.0, speed_kph=80.0,
+  def _stock_ready(self, *, acc_state=4, set_speed=82.0, speed_kph=80.0,
                    accel_min=0.2, accel_max=0.6, a_ego=0.2):
     car_state = CarStateExt.__new__(CarStateExt)
     car_state.das_control = {
@@ -202,6 +202,10 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
     self.assertFalse(self._stock_ready(accel_min=0.8, accel_max=1.0))
     self.assertFalse(self._stock_ready(a_ego=0.5))
 
+  def test_dynamic_stock_handoff_rejects_acceleration_spike_risk(self):
+    self.assertFalse(self._stock_ready(set_speed=87.5, speed_kph=80.0, accel_min=-1.12, accel_max=0.24))
+    self.assertFalse(self._stock_ready(set_speed=82.0, speed_kph=80.0, accel_min=-1.12, accel_max=2.0))
+
   def test_counter_resyncs_after_each_stock_period(self):
     controller = CarController.__new__(CarController)
     controller.long_control_counter = None
@@ -232,6 +236,31 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
     )
     self.assertEqual(4, state)
     self.assertEqual(-1.2, accel)
+
+  def test_sp_takeover_accel_ramps_up_from_stock_accel(self):
+    controller = CarController.__new__(CarController)
+    controller.frame = 100
+    controller.last_long_control_frame = 96
+    controller.sp_takeover_accel = 0.0
+    controller.sp_takeover_ramp_frames = 100
+
+    accel = controller._limited_sp_takeover_accel(long_active=True, requested_accel=1.2)
+
+    self.assertGreater(accel, 0.0)
+    self.assertLess(accel, 1.2)
+    self.assertLess(controller.sp_takeover_ramp_frames, 100)
+
+  def test_inactive_sp_takeover_does_not_ramp_accel(self):
+    controller = CarController.__new__(CarController)
+    controller.frame = 100
+    controller.last_long_control_frame = 96
+    controller.sp_takeover_accel = 0.0
+    controller.sp_takeover_ramp_frames = 100
+
+    accel = controller._limited_sp_takeover_accel(long_active=False, requested_accel=1.2)
+
+    self.assertEqual(1.2, accel)
+    self.assertEqual(1.2, controller.sp_takeover_accel)
 
   def test_stock_handoff_uses_blocked_internal_marker(self):
     values = {

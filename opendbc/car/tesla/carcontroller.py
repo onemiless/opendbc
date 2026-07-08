@@ -1,6 +1,6 @@
 import numpy as np
 from opendbc.can import CANPacker
-from opendbc.car import Bus
+from opendbc.car import Bus, DT_CTRL
 from opendbc.car.lateral import apply_steer_angle_limits_vm
 from opendbc.car.interfaces import CarControllerBase
 from opendbc.car.tesla.teslacan import TeslaCAN
@@ -9,6 +9,10 @@ from opendbc.car.vehicle_model import VehicleModel
 from opendbc.sunnypilot.car.tesla.coop_steering import CoopSteeringCarController
 from opendbc.sunnypilot.car.tesla.dynamic_acc_debug import log_dynamic_acc
 from opendbc.sunnypilot.car.tesla.icbm import IntelligentCruiseButtonManagementInterface
+
+SP_TAKEOVER_RAMP_FRAMES = 100
+SP_TAKEOVER_ACCEL_RATE_UP = 0.6
+SP_TAKEOVER_ACCEL_RATE_DOWN = 1.5
 
 
 def get_safety_CP():
@@ -34,6 +38,8 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
     self.long_control_counter = None
     self.last_long_control_frame = -4
     self.dynamic_acc_debug_followup_frames = 0
+    self.sp_takeover_accel = 0.0
+    self.sp_takeover_ramp_frames = 0
     # Vehicle model used for lateral limiting
     self.VM = VehicleModel(get_safety_CP())
 
@@ -67,8 +73,11 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
         self.dynamic_acc_debug_followup_frames = 100
         self._log_longitudinal_transition("entering_stock", CC, CS, handoff_msg=handoff_msg)
         self.leaving_stock_pending = False
+        self.sp_takeover_ramp_frames = 0
       elif leaving_stock:
         self.leaving_stock_pending = True
+        self.sp_takeover_accel = self._stock_accel_midpoint(CS)
+        self.sp_takeover_ramp_frames = SP_TAKEOVER_RAMP_FRAMES
         self.dynamic_acc_debug_followup_frames = 100
         self._log_longitudinal_transition("leaving_stock", CC, CS)
 
@@ -78,7 +87,7 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
         if not CS.tesla_stock_longitudinal_active:
           state, accel = self._longitudinal_state_accel(
             self.leaving_stock_pending, self._cruise_enabled(CS), CC.longActive,
-            CC.cruiseControl.cancel, actuators.accel,
+            CC.cruiseControl.cancel, self._limited_sp_takeover_accel(CC.longActive, actuators.accel),
           )
           cntr = self._next_long_control_counter(CS.das_control["DAS_controlCounter"], self.leaving_stock_pending)
           long_msg = self.tesla_can.create_longitudinal_command(state, accel, cntr, CS.out.vEgo, CC.longActive, CS.cruise_override)
@@ -129,6 +138,29 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
   def _cruise_enabled(CS):
     return CS.out.cruiseState.enabled
 
+  @staticmethod
+  def _stock_accel_midpoint(CS):
+    das = CS.das_control
+    return float(np.clip((float(das["DAS_accelMin"]) + float(das["DAS_accelMax"])) / 2.0,
+                         CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
+
+  def _limited_sp_takeover_accel(self, long_active, requested_accel):
+    requested_accel = float(np.clip(requested_accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
+    if not long_active or self.sp_takeover_ramp_frames <= 0:
+      self.sp_takeover_accel = requested_accel
+      return requested_accel
+
+    dt = max(1, self.frame - self.last_long_control_frame) * DT_CTRL
+    rate = SP_TAKEOVER_ACCEL_RATE_UP if requested_accel > self.sp_takeover_accel else SP_TAKEOVER_ACCEL_RATE_DOWN
+    max_delta = rate * dt
+    self.sp_takeover_accel = float(np.clip(requested_accel,
+                                           self.sp_takeover_accel - max_delta,
+                                           self.sp_takeover_accel + max_delta))
+    self.sp_takeover_ramp_frames = max(0, self.sp_takeover_ramp_frames - max(1, self.frame - self.last_long_control_frame))
+    if abs(self.sp_takeover_accel - requested_accel) < 1e-3:
+      self.sp_takeover_ramp_frames = 0
+    return self.sp_takeover_accel
+
   def _log_longitudinal_transition(self, event, CC, CS, **extra):
     das = CS.das_control
     can_payloads = {
@@ -149,6 +181,8 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
       cruise_override=CS.cruise_override,
       ego_speed=CS.out.vEgo,
       requested_accel=CC.actuators.accel,
+      sp_takeover_accel=self.sp_takeover_accel,
+      sp_takeover_ramp_frames=self.sp_takeover_ramp_frames,
       das_acc_state=das.get("DAS_accState"),
       das_set_speed=das.get("DAS_setSpeed"),
       das_accel_min=das.get("DAS_accelMin"),

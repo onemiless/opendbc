@@ -16,7 +16,9 @@ from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP
 ButtonType = structs.CarState.ButtonEvent.Type
 
 DYNAMIC_STOCK_MAX_SPEED_ERROR_KPH = 8.0
+DYNAMIC_STOCK_MAX_SET_SPEED_OVERSHOOT_KPH = 3.0
 DYNAMIC_STOCK_MAX_ACCEL_ERROR = 0.7
+DYNAMIC_STOCK_MAX_ACCEL_MAX = 1.0
 DYNAMIC_STOCK_MAX_EGO_ACCEL = 0.35
 
 
@@ -65,12 +67,16 @@ class CarStateExt:
       return False
 
     stock_set_speed = float(das["DAS_setSpeed"])
-    stock_accel = (float(das["DAS_accelMin"]) + float(das["DAS_accelMax"])) / 2.0
+    stock_speed_error = stock_set_speed - speed_kph
+    stock_accel_max = float(das["DAS_accelMax"])
+    stock_accel = (float(das["DAS_accelMin"]) + stock_accel_max) / 2.0
     stock_acc_active = int(das["DAS_accState"]) in (2, 3, 4, 5)
     return (stock_acc_active and
             int(das["DAS_aebEvent"]) == 0 and
-            abs(stock_set_speed - speed_kph) < DYNAMIC_STOCK_MAX_SPEED_ERROR_KPH and
+            abs(stock_speed_error) < DYNAMIC_STOCK_MAX_SPEED_ERROR_KPH and
+            stock_speed_error <= DYNAMIC_STOCK_MAX_SET_SPEED_OVERSHOOT_KPH and
             abs(stock_accel) < DYNAMIC_STOCK_MAX_ACCEL_ERROR and
+            stock_accel_max <= DYNAMIC_STOCK_MAX_ACCEL_MAX and
             abs(ret.aEgo) < DYNAMIC_STOCK_MAX_EGO_ACCEL)
 
   def _toggle_stock_longitudinal_from_touch(self, ret: structs.CarState, speed_kph: float) -> bool:
