@@ -517,6 +517,22 @@ class TestTeslaLongitudinalSafety(TestTeslaSafetyBase):
       self.assertTrue(self._tx(op_cmd))
       self.assertEqual(-1, self.safety.safety_fwd_hook(2, MSG_DAS_Control))
 
+  def test_ap_hybrid_uses_atomic_stock_handoff_permission(self):
+    self.assertEqual(TeslaSafetyFlagsSP.DYNAMIC_AUTO_STOCK, TeslaSafetyFlagsSP.AP_HYBRID_HANDOFF)
+    self.addCleanup(self.safety.set_current_safety_param_sp, 0)
+    self.safety.set_current_safety_param_sp(TeslaSafetyFlagsSP.AP_HYBRID_HANDOFF)
+    self.safety.set_safety_hooks(CarParams.SafetyModel.tesla, self.SAFETY_PARAM)
+    self.safety.init_tests()
+
+    stock = self._long_control_msg(50, acc_state=self.acc_states["ACC_ON"],
+                                   accel_limits=(0, 0), bus=2, counter=3)
+    handoff = self._long_control_msg(50, acc_state=self.acc_states["ACC_ON"],
+                                     accel_limits=(0, 0), aeb_event=3, bus=0, counter=3)
+    self.assertTrue(self._rx(stock))
+    self.assertEqual(-1, self.safety.safety_fwd_hook(2, MSG_DAS_Control))
+    self.assertFalse(self._tx(handoff))
+    self.assertEqual(0, self.safety.safety_fwd_hook(2, MSG_DAS_Control))
+
   def test_rejected_sp_takeover_keeps_oem_forwarding_open(self):
     self.addCleanup(self.safety.set_current_safety_param_sp, 0)
     self.safety.set_current_safety_param_sp(TeslaSafetyFlagsSP.DYNAMIC_AUTO_STOCK)

@@ -87,6 +87,7 @@ def setup_interfaces(CI, CP: structs.CarParams, CP_SP: structs.CarParamsSP,
   _initialize_coop_steering(CP, CP_SP, params_dict)
   _initialize_tesla_mads_screen_button(CP, CP_SP, params_dict)
   _initialize_tesla_dynamic_auto_stock(CP, CP_SP, params_dict)
+  _initialize_tesla_ap_hybrid(CP, CP_SP, params_dict)
   _initialize_tesla_speed_limit_cruise_buttons(CP, CP_SP, params_dict)
   _initialize_radar_tracks(CP, CP_SP, can_recv, can_send)
   _initialize_stop_and_go(CP, CP_SP, params_dict)
@@ -148,6 +149,13 @@ def _initialize_tesla_dynamic_auto_stock(CP: structs.CarParams, CP_SP: structs.C
       CP_SP.safetyParam |= TeslaSafetyFlagsSP.DYNAMIC_AUTO_STOCK
       CP_SP.safetyParam |= (high_kph // 5) << TeslaSafetyFlagsSP.DYNAMIC_AUTO_STOCK_HIGH_SHIFT
       CP_SP.safetyParam |= (low_kph // 5) << TeslaSafetyFlagsSP.DYNAMIC_AUTO_STOCK_LOW_SHIFT
+
+
+def _initialize_tesla_ap_hybrid(CP: structs.CarParams, CP_SP: structs.CarParamsSP,
+                                params_dict: dict[str, str]) -> None:
+  if CP.brand == 'tesla' and CP.openpilotLongitudinalControl and int(params_dict.get("TeslaApHybrid", 0)) == 1:
+    CP_SP.flags |= TeslaFlagsSP.AP_HYBRID.value
+    CP_SP.safetyParam |= TeslaSafetyFlagsSP.AP_HYBRID_HANDOFF
 
 
 def _initialize_tesla_speed_limit_cruise_buttons(CP: structs.CarParams, CP_SP: structs.CarParamsSP,

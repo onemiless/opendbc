@@ -15,8 +15,10 @@ from opendbc.car.tesla.fingerprints import FW_VERSIONS
 from opendbc.car.tesla.radar_interface import RADAR_START_ADDR
 from opendbc.car.tesla.teslacan import TeslaCAN
 from opendbc.car.tesla.values import CANBUS, CAR, FSD_14_FW
-from opendbc.sunnypilot.car.tesla.carstate_ext import CarStateExt
+from opendbc.sunnypilot.car.tesla.carstate_ext import CarStateExt, TeslaLongitudinalSource
 from opendbc.sunnypilot.car.tesla import dynamic_acc_debug
+from opendbc.sunnypilot.car.interfaces import _initialize_tesla_ap_hybrid
+from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP, TeslaSafetyFlagsSP
 
 Ecu = CarParams.Ecu
 
@@ -119,6 +121,24 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
     car_state = SimpleNamespace(out=SimpleNamespace(cruiseState=SimpleNamespace(enabled=True)))
     self.assertTrue(CarController._cruise_enabled(car_state))
 
+  def test_ap_hybrid_initialization_sets_runtime_and_safety_flags(self):
+    cp = SimpleNamespace(brand="tesla", openpilotLongitudinalControl=True)
+    cp_sp = SimpleNamespace(flags=0, safetyParam=0)
+
+    _initialize_tesla_ap_hybrid(cp, cp_sp, {"TeslaApHybrid": "1"})
+
+    self.assertTrue(cp_sp.flags & TeslaFlagsSP.AP_HYBRID)
+    self.assertTrue(cp_sp.safetyParam & TeslaSafetyFlagsSP.AP_HYBRID_HANDOFF)
+
+  def test_ap_hybrid_initialization_requires_openpilot_longitudinal(self):
+    cp = SimpleNamespace(brand="tesla", openpilotLongitudinalControl=False)
+    cp_sp = SimpleNamespace(flags=0, safetyParam=0)
+
+    _initialize_tesla_ap_hybrid(cp, cp_sp, {"TeslaApHybrid": "1"})
+
+    self.assertEqual(0, cp_sp.flags)
+    self.assertEqual(0, cp_sp.safetyParam)
+
   def test_dynamic_acc_debug_writes_json_line(self):
     with tempfile.TemporaryDirectory() as temp_dir:
       log_path = Path(temp_dir) / "dynamic_acc_debug.log"
@@ -205,6 +225,123 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
   def test_dynamic_stock_handoff_rejects_acceleration_spike_risk(self):
     self.assertFalse(self._stock_ready(set_speed=87.5, speed_kph=80.0, accel_min=-1.12, accel_max=0.24))
     self.assertFalse(self._stock_ready(set_speed=82.0, speed_kph=80.0, accel_min=-1.12, accel_max=2.0))
+
+  @staticmethod
+  def _override_state(owner=TeslaLongitudinalSource.sp):
+    car_state = CarStateExt.__new__(CarStateExt)
+    car_state._init_longitudinal_override_state()
+    car_state._set_longitudinal_source(owner)
+    car_state._dyn_enter_frames = 0
+    car_state._dyn_exit_frames = 0
+    car_state._dyn_cooldown_frames = 0
+    car_state._dyn_debug_followup_frames = 0
+    car_state._dyn_manual_override = False
+    car_state._dyn_manual_saw_sp_off = False
+    car_state.das_control = {
+      "DAS_accState": 4,
+      "DAS_setSpeed": 80.0,
+      "DAS_accelMin": 0.0,
+      "DAS_accelMax": 0.0,
+      "DAS_aebEvent": 0,
+      "DAS_controlCounter": 0,
+    }
+    return car_state
+
+  def test_blinker_requires_distinct_samples_and_300ms(self):
+    car_state = self._override_state()
+
+    car_state._update_blinker_sample(True, 1, 1.00)
+    car_state._update_blinker_sample(True, 1, 1.10)  # repeated parser value, not a new CAN frame
+    car_state._update_blinker_sample(True, 2, 1.10)
+    car_state._update_blinker_sample(True, 3, 1.20)
+    self.assertFalse(car_state._blinker_force_active(1.20))
+
+    car_state._update_blinker_sample(True, 4, 1.30)
+    self.assertTrue(car_state._blinker_force_active(1.30))
+
+  def test_blinker_counter_wrap_and_stale_are_handled(self):
+    car_state = self._override_state()
+    for counter, now in ((14, 1.0), (15, 1.1), (0, 1.2), (1, 1.3)):
+      car_state._update_blinker_sample(True, counter, now)
+
+    self.assertTrue(car_state._blinker_force_active(1.3))
+    self.assertFalse(car_state._blinker_force_active(1.71))
+    self.assertFalse(car_state._blinker_known_inactive(1.71))
+
+    car_state._update_blinker_sample(False, 2, 1.8)
+    self.assertTrue(car_state._blinker_known_inactive(1.8))
+
+  def test_curve_request_counts_only_new_fresh_plan_samples(self):
+    car_state = self._override_state()
+    car_state.update_longitudinal_context(1, True, True, 2.00, False, True, 2.00)
+    car_state.update_longitudinal_context(1, False, True, 2.00, False, True, 2.01)
+    self.assertFalse(car_state._curve_force_active(2.01))
+
+    car_state.update_longitudinal_context(1, True, True, 2.05, False, True, 2.05)
+    self.assertTrue(car_state._curve_force_active(2.05))
+    self.assertFalse(car_state._curve_force_active(2.26))
+    self.assertFalse(car_state._external_context_clear(2.26))
+
+    car_state.update_longitudinal_context(1, True, True, 2.50, False, True, 2.50)
+    self.assertFalse(car_state._curve_force_active(2.50))
+    car_state.update_longitudinal_context(1, True, True, 2.55, False, True, 2.55)
+    self.assertTrue(car_state._curve_force_active(2.55))
+
+  def test_force_sp_only_overrides_dynamic_stock(self):
+    ret = SimpleNamespace(brakePressed=False, gasPressed=False, accFaulted=False,
+                          aEgo=0.0, cruiseState=SimpleNamespace(enabled=True, available=True))
+
+    dynamic = self._override_state(TeslaLongitudinalSource.dynamicStock)
+    self.assertTrue(dynamic._force_dynamic_stock_to_sp("blinker", ret, 80.0))
+    self.assertEqual(TeslaLongitudinalSource.sp, dynamic.tesla_longitudinal_source)
+    self.assertFalse(dynamic.tesla_stock_longitudinal_active)
+
+    manual = self._override_state(TeslaLongitudinalSource.manualStock)
+    self.assertFalse(manual._force_dynamic_stock_to_sp("blinker", ret, 80.0))
+    self.assertEqual(TeslaLongitudinalSource.manualStock, manual.tesla_longitudinal_source)
+
+    hybrid = self._override_state(TeslaLongitudinalSource.apHybridStock)
+    self.assertFalse(hybrid._force_dynamic_stock_to_sp("curve", ret, 80.0))
+    self.assertEqual(TeslaLongitudinalSource.apHybridStock, hybrid.tesla_longitudinal_source)
+
+  def test_ap_hybrid_restores_complete_previous_source(self):
+    car_state = self._override_state(TeslaLongitudinalSource.manualStock)
+    car_state._ap_hybrid_enabled = True
+    car_state.tesla_ap_hybrid_active = False
+    ret = SimpleNamespace(brakePressed=False, gasPressed=False, accFaulted=False,
+                          aEgo=0.0, cruiseState=SimpleNamespace(enabled=True, available=True))
+
+    self.assertTrue(car_state._update_ap_hybrid(ret, 3, 80.0))
+    self.assertEqual(TeslaLongitudinalSource.apHybridStock, car_state.tesla_longitudinal_source)
+
+    self.assertFalse(car_state._update_ap_hybrid(ret, 2, 80.0))
+    self.assertEqual(TeslaLongitudinalSource.manualStock, car_state.tesla_longitudinal_source)
+
+  def test_ap_hybrid_ignores_dynamic_force_requests(self):
+    car_state = self._override_state(TeslaLongitudinalSource.apHybridStock)
+    car_state._ap_hybrid_enabled = True
+    car_state.tesla_ap_hybrid_active = True
+    ret = SimpleNamespace(brakePressed=False, gasPressed=False, accFaulted=False,
+                          aEgo=0.0, cruiseState=SimpleNamespace(enabled=True, available=True))
+
+    self.assertTrue(car_state._update_ap_hybrid(ret, 3, 80.0))
+    self.assertFalse(car_state._force_dynamic_stock_to_sp("curve", ret, 80.0))
+    self.assertEqual(TeslaLongitudinalSource.apHybridStock, car_state.tesla_longitudinal_source)
+
+  def test_stock_return_requires_one_second_of_clear_context(self):
+    car_state = self._override_state()
+    for index in range(10):
+      now = 3.0 + index * 0.1
+      car_state.update_longitudinal_context(0, True, True, now, False, True, now)
+      car_state._update_blinker_sample(False, index, now)
+    self.assertFalse(car_state._stock_return_context_ready(3.99))
+    car_state.update_longitudinal_context(0, True, True, 4.0, False, True, 4.0)
+    car_state._update_blinker_sample(False, 10, 4.0)
+    self.assertTrue(car_state._stock_return_context_ready(4.0))
+
+    car_state.update_longitudinal_context(1, True, True, 4.01, False, True, 4.01)
+    car_state.update_longitudinal_context(1, True, True, 4.06, False, True, 4.06)
+    self.assertFalse(car_state._stock_return_context_ready(4.06))
 
   def test_counter_resyncs_after_each_stock_period(self):
     controller = CarController.__new__(CarController)
