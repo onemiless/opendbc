@@ -146,7 +146,7 @@ def _initialize_tesla_ap_hybrid(CP: structs.CarParams, CP_SP: structs.CarParamsS
     CP_SP.flags |= TeslaFlagsSP.AP_HYBRID.value
     if int(params_dict.get("TeslaDynamicApLongitudinal", 0)) == 1:
       CP_SP.flags |= TeslaFlagsSP.DYNAMIC_AP_LONGITUDINAL.value
-    CP_SP.safetyParam |= TeslaSafetyFlagsSP.AP_HYBRID_HANDOFF
+    CP_SP.safetyParam |= TeslaSafetyFlagsSP.AP_HYBRID_HANDOFF | TeslaSafetyFlagsSP.AP_HYBRID_LATERAL_HANDOFF
 
 
 def _initialize_tesla_speed_limit_cruise_buttons(CP: structs.CarParams, CP_SP: structs.CarParamsSP,

@@ -31,6 +31,14 @@ class TeslaCAN:
 
     return self.packer.make_can_msg("DAS_steeringControl", CANBUS.party, values)
 
+  def create_stock_lateral_handoff(self, steering_angle):
+    values = {
+      "DAS_steeringAngleRequest": -steering_angle,
+      "DAS_steeringHapticRequest": 0,
+      "DAS_steeringControlType": 3,  # Internal handoff marker; panda safety blocks this frame.
+    }
+    return self.packer.make_can_msg("DAS_steeringControl", CANBUS.party, values)
+
   def create_longitudinal_command(self, acc_state, accel, counter, v_ego, active, cruise_override):
     set_speed = min(max(v_ego + accel, 0) * CV.MS_TO_KPH, 400)
 

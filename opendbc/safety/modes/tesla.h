@@ -47,6 +47,8 @@ uint8_t tesla_mads_screen_button_fingers = 0U;
 static bool tesla_stock_longitudinal_active = false;
 static bool tesla_dynamic_auto_stock = false;
 static bool tesla_ap_hybrid_handoff = false;
+static bool tesla_ap_hybrid_lateral_handoff = false;
+static bool tesla_ap_stock_lateral_active = false;
 static bool tesla_speed_limit_cruise_buttons = false;
 
 static uint8_t tesla_get_counter(const CANPacket_t *msg) {
@@ -276,6 +278,7 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
   bool tx = true;
   bool violation = false;
   bool longitudinal_takeover = false;
+  bool lateral_takeover = false;
 
   // Don't send any messages when Autopark is active
   if (tesla_summon) {
@@ -290,6 +293,14 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
     int steer_control_type = msg->data[2] >> 6;
     const int angle_ctrl_type = tesla_get_steer_ctrl_type(1);
     bool steer_control_enabled = steer_control_type == angle_ctrl_type;  // ANGLE_CONTROL
+
+    // Control type 3 is reserved as an internal AP lateral handoff marker.
+    // It opens OEM steering forwarding and is never transmitted to the vehicle.
+    if (tesla_ap_hybrid_lateral_handoff && (steer_control_type == 3)) {
+      tesla_ap_stock_lateral_active = true;
+      return false;
+    }
+    lateral_takeover = tesla_ap_stock_lateral_active;
 
     if (steer_angle_cmd_checks_vm(desired_angle, steer_control_enabled, TESLA_STEERING_LIMITS, TESLA_STEERING_PARAMS)) {
       violation = true;
@@ -407,6 +418,9 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
   if (longitudinal_takeover && tx) {
     tesla_stock_longitudinal_active = false;
   }
+  if (lateral_takeover && tx) {
+    tesla_ap_stock_lateral_active = false;
+  }
 
   return tx;
 }
@@ -422,7 +436,7 @@ static bool tesla_fwd_hook(int bus_num, int addr) {
       }
 
       // DAS_steeringControl
-      if ((addr == 0x488) && !tesla_stock_steering_control) {
+      if ((addr == 0x488) && !tesla_stock_steering_control && !tesla_ap_stock_lateral_active) {
         block_msg = true;
       }
 
@@ -478,6 +492,7 @@ static safety_config tesla_init(uint16_t param) {
   const uint16_t TESLA_PARAM_SP_DYNAMIC_AUTO_STOCK = 16;
   const uint16_t TESLA_PARAM_SP_SPEED_LIMIT_CRUISE_BUTTONS = 32;
   const uint16_t TESLA_PARAM_SP_AP_HYBRID_HANDOFF = 64;
+  const uint16_t TESLA_PARAM_SP_AP_HYBRID_LATERAL_HANDOFF = 128;
 
   tesla_has_vehicle_bus = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_VEHICLE_BUS);
 
@@ -494,11 +509,13 @@ static safety_config tesla_init(uint16_t param) {
   tesla_dynamic_auto_stock = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_DYNAMIC_AUTO_STOCK);
   tesla_speed_limit_cruise_buttons = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_SPEED_LIMIT_CRUISE_BUTTONS);
   tesla_ap_hybrid_handoff = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_AP_HYBRID_HANDOFF);
+  tesla_ap_hybrid_lateral_handoff = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_AP_HYBRID_LATERAL_HANDOFF);
 
   tesla_stock_aeb = false;
   tesla_stock_steering_control = false;
   tesla_stock_steering_control_prev = false;
   tesla_stock_longitudinal_active = false;
+  tesla_ap_stock_lateral_active = false;
   // we need to assume Autopark/Summon on startup since DI_state is a low freq msg.
   // this is so that we don't fault if starting while these systems are active
   tesla_summon = true;

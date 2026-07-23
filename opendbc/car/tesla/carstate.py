@@ -31,6 +31,7 @@ class CarState(CarStateBase, CarStateExt):
     self.prev_acc_state = 0
     self.prev_speed_control_state = 0
     self.das_control = None
+    self.das_steering_control = None
     self.stw_action_counter = 0
 
   def update_summon_state(self, summon_state: str, cruise_enabled: bool):
@@ -194,6 +195,7 @@ class CarState(CarStateBase, CarStateExt):
 
     # Messages needed by carcontroller
     self.das_control = copy.copy(cp_ap_party.vl["DAS_control"])
+    self.das_steering_control = copy.copy(cp_ap_party.vl["DAS_steeringControl"])
 
     CarStateExt.update(self, ret, ret_sp, can_parsers)
     # An AP hybrid session deliberately leaves Tesla AP active while SP may own

@@ -533,6 +533,46 @@ class TestTeslaLongitudinalSafety(TestTeslaSafetyBase):
     self.assertFalse(self._tx(handoff))
     self.assertEqual(0, self.safety.safety_fwd_hook(2, MSG_DAS_Control))
 
+  def test_ap_hybrid_lateral_handoff_is_atomic(self):
+    self.addCleanup(self.safety.set_current_safety_param_sp, 0)
+    self.safety.set_current_safety_param_sp(TeslaSafetyFlagsSP.AP_HYBRID_LATERAL_HANDOFF)
+    self.safety.set_safety_hooks(CarParams.SafetyModel.tesla, self.SAFETY_PARAM)
+    self.safety.init_tests()
+    self.safety.set_controls_allowed(True)
+    self.safety.set_controls_allowed_lateral(True)
+
+    stock = self._angle_cmd_msg(0, True, bus=2)
+    handoff = self._angle_cmd_msg(0, 3, bus=0)
+    self.assertTrue(self._rx(stock))
+    self.assertEqual(-1, self.safety.safety_fwd_hook(2, MSG_DAS_steeringControl))
+
+    self.assertFalse(self._tx(handoff))
+    self.assertEqual(0, self.safety.safety_fwd_hook(2, MSG_DAS_steeringControl))
+
+    sp_takeover = self._angle_cmd_msg(0, True, bus=0)
+    self.assertTrue(self._tx(sp_takeover))
+    self.assertEqual(-1, self.safety.safety_fwd_hook(2, MSG_DAS_steeringControl))
+
+  def test_rejected_sp_lateral_takeover_keeps_oem_forwarding_open(self):
+    self.addCleanup(self.safety.set_current_safety_param_sp, 0)
+    self.safety.set_current_safety_param_sp(TeslaSafetyFlagsSP.AP_HYBRID_LATERAL_HANDOFF)
+    self.safety.set_safety_hooks(CarParams.SafetyModel.tesla, self.SAFETY_PARAM)
+    self.safety.init_tests()
+    self.safety.set_controls_allowed(True)
+    self.safety.set_controls_allowed_lateral(True)
+
+    handoff = self._angle_cmd_msg(0, 3, bus=0)
+    self.assertFalse(self._tx(handoff))
+    self.assertEqual(0, self.safety.safety_fwd_hook(2, MSG_DAS_steeringControl))
+
+    rejected_takeover = self._angle_cmd_msg(self.STEER_ANGLE_MAX + 10, True, bus=0)
+    self.assertFalse(self._tx(rejected_takeover))
+    self.assertEqual(0, self.safety.safety_fwd_hook(2, MSG_DAS_steeringControl))
+
+    safe_inactive_takeover = self._angle_cmd_msg(0, False, bus=0)
+    self.assertTrue(self._tx(safe_inactive_takeover))
+    self.assertEqual(-1, self.safety.safety_fwd_hook(2, MSG_DAS_steeringControl))
+
   def test_rejected_sp_takeover_keeps_oem_forwarding_open(self):
     self.addCleanup(self.safety.set_current_safety_param_sp, 0)
     self.safety.set_current_safety_param_sp(TeslaSafetyFlagsSP.DYNAMIC_AUTO_STOCK)

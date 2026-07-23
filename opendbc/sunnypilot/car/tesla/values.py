@@ -21,6 +21,7 @@ class TeslaFlagsSP(IntFlag):
   DYNAMIC_STOCK_ACTIVE = 1024  # Runtime source: Dynamic ACC selected stock longitudinal
   MANUAL_STOCK_ACTIVE = 2048  # Runtime source: 4-finger selection chose stock longitudinal
   DYNAMIC_AP_LONGITUDINAL = 4096  # Config: switch AP longitudinal between SP and OEM using speed hysteresis
+  AP_HYBRID_STOCK_LATERAL_ACTIVE = 8192  # Runtime: Tesla AP owns lateral control
 
 
 class MadsScreenButtonType:
@@ -38,3 +39,4 @@ class TeslaSafetyFlagsSP:
   DYNAMIC_AUTO_STOCK = 16
   SPEED_LIMIT_CRUISE_BUTTONS = 32
   AP_HYBRID_HANDOFF = 64
+  AP_HYBRID_LATERAL_HANDOFF = 128

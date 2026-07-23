@@ -34,6 +34,7 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
 
     # Track longitudinal source transitions independently of the 25 Hz TX phase.
     self.prev_stock_longitudinal = False
+    self.prev_stock_lateral = False
     self.leaving_stock_pending = False
     self.long_control_counter = None
     self.last_long_control_frame = -4
@@ -50,8 +51,20 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
     # Wait until the override condition clears before steering
     # Canceling is done on rising edge of CS.out.steeringDisengage and is handled generically with CC.cruiseControl.cancel
     lat_active = CC.latActive and not CS.out.steeringDisengage
+    stock_lateral = bool(getattr(CS, "tesla_stock_lateral_active", False))
+    entering_stock_lateral = stock_lateral and not self.prev_stock_lateral
+    leaving_stock_lateral = not stock_lateral and self.prev_stock_lateral
 
-    if self.frame % 2 == 0:
+    if entering_stock_lateral:
+      lateral_handoff_msg = self.tesla_can.create_stock_lateral_handoff(CS.out.steeringAngleDeg)
+      can_sends.append(lateral_handoff_msg)
+      self._log_lateral_transition("entering_stock_lateral", CC, CS, handoff_msg=lateral_handoff_msg)
+    elif leaving_stock_lateral:
+      self.apply_angle_last = CS.out.steeringAngleDeg
+      self.coop_steer.reset_override_state(self.apply_angle_last)
+      self._log_lateral_transition("leaving_stock_lateral", CC, CS)
+
+    if self.frame % 2 == 0 and not stock_lateral:
       # Angular rate limit based on speed
       self.apply_angle_last = apply_steer_angle_limits_vm(actuators.steeringAngleDeg, self.apply_angle_last, CS.out.vEgoRaw, CS.out.steeringAngleDeg,
                                                           lat_active, CarControllerParams, self.VM)
@@ -116,6 +129,7 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
     new_actuators.torque = float(self.coop_steer.angle_override) # debug
 
     self.prev_stock_longitudinal = CS.tesla_stock_longitudinal_active
+    self.prev_stock_lateral = stock_lateral
     self.frame += 1
     return new_actuators, can_sends
 
@@ -150,16 +164,36 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
       self.sp_takeover_accel = requested_accel
       return requested_accel
 
-    dt = max(1, self.frame - self.last_long_control_frame) * DT_CTRL
+    elapsed_frames = min(4, max(1, self.frame - self.last_long_control_frame))
+    dt = elapsed_frames * DT_CTRL
     rate = SP_TAKEOVER_ACCEL_RATE_UP if requested_accel > self.sp_takeover_accel else SP_TAKEOVER_ACCEL_RATE_DOWN
     max_delta = rate * dt
     self.sp_takeover_accel = float(np.clip(requested_accel,
                                            self.sp_takeover_accel - max_delta,
                                            self.sp_takeover_accel + max_delta))
-    self.sp_takeover_ramp_frames = max(0, self.sp_takeover_ramp_frames - max(1, self.frame - self.last_long_control_frame))
+    self.sp_takeover_ramp_frames = max(0, self.sp_takeover_ramp_frames - elapsed_frames)
     if abs(self.sp_takeover_accel - requested_accel) < 1e-3:
       self.sp_takeover_ramp_frames = 0
     return self.sp_takeover_accel
+
+  def _log_lateral_transition(self, event, CC, CS, **extra):
+    can_payloads = {
+      key: value[1].hex() if value is not None else None
+      for key, value in extra.items() if key.endswith("_msg")
+    }
+    log_dynamic_acc(
+      "carcontroller", event,
+      frame=self.frame,
+      stock_lateral_active=bool(getattr(CS, "tesla_stock_lateral_active", False)),
+      previous_stock_lateral_active=self.prev_stock_lateral,
+      cc_lat_active=CC.latActive,
+      sp_steering_angle_request=CC.actuators.steeringAngleDeg,
+      steering_angle=CS.out.steeringAngleDeg,
+      steering_torque=CS.out.steeringTorque,
+      oem_steering_angle_request=(getattr(CS, "das_steering_control", {}) or {}).get("DAS_steeringAngleRequest"),
+      oem_steering_control_type=(getattr(CS, "das_steering_control", {}) or {}).get("DAS_steeringControlType"),
+      **can_payloads,
+    )
 
   def _log_longitudinal_transition(self, event, CC, CS, **extra):
     das = CS.das_control
