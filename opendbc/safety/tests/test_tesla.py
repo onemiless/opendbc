@@ -518,7 +518,7 @@ class TestTeslaLongitudinalSafety(TestTeslaSafetyBase):
       self.assertEqual(-1, self.safety.safety_fwd_hook(2, MSG_DAS_Control))
 
   def test_ap_hybrid_uses_atomic_stock_handoff_permission(self):
-    self.assertEqual(TeslaSafetyFlagsSP.DYNAMIC_AUTO_STOCK, TeslaSafetyFlagsSP.AP_HYBRID_HANDOFF)
+    self.assertNotEqual(TeslaSafetyFlagsSP.DYNAMIC_AUTO_STOCK, TeslaSafetyFlagsSP.AP_HYBRID_HANDOFF)
     self.addCleanup(self.safety.set_current_safety_param_sp, 0)
     self.safety.set_current_safety_param_sp(TeslaSafetyFlagsSP.AP_HYBRID_HANDOFF)
     self.safety.set_safety_hooks(CarParams.SafetyModel.tesla, self.SAFETY_PARAM)

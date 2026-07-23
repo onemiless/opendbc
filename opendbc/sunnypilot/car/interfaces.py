@@ -136,19 +136,8 @@ def _initialize_tesla_dynamic_auto_stock(CP: structs.CarParams, CP_SP: structs.C
   if CP.brand == 'tesla' and CP.openpilotLongitudinalControl:
     dynamic_auto_stock = int(params_dict.get("DynamicAutoStock", 0)) == 1
     if dynamic_auto_stock:
-      high_kph = max(0, min(155, int(params_dict.get("DynamicAutoStockSpeedKph", 80))))
-      low_kph = max(0, min(155, int(params_dict.get("DynamicAutoStockSpeedLowKph", 70))))
-      high_kph = (high_kph // 5) * 5
-      low_kph = (low_kph // 5) * 5
-      if high_kph == 0:
-        high_kph = 80
-      if low_kph >= high_kph:
-        low_kph = max(0, high_kph - 5)
-
       CP_SP.flags |= TeslaFlagsSP.DYNAMIC_AUTO_STOCK.value
       CP_SP.safetyParam |= TeslaSafetyFlagsSP.DYNAMIC_AUTO_STOCK
-      CP_SP.safetyParam |= (high_kph // 5) << TeslaSafetyFlagsSP.DYNAMIC_AUTO_STOCK_HIGH_SHIFT
-      CP_SP.safetyParam |= (low_kph // 5) << TeslaSafetyFlagsSP.DYNAMIC_AUTO_STOCK_LOW_SHIFT
 
 
 def _initialize_tesla_ap_hybrid(CP: structs.CarParams, CP_SP: structs.CarParamsSP,

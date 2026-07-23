@@ -98,6 +98,20 @@ class CarStateExt:
       return self.tesla_longitudinal_source
     return TeslaLongitudinalSource.dynamicStock if self.tesla_stock_longitudinal_active else TeslaLongitudinalSource.sp
 
+  def _longitudinal_source_flags(self) -> TeslaFlagsSP:
+    source = self._get_longitudinal_source()
+    if source == TeslaLongitudinalSource.sp:
+      return TeslaFlagsSP(0)
+
+    flags = TeslaFlagsSP.STOCK_LONGITUDINAL_ACTIVE
+    if source == TeslaLongitudinalSource.apHybridStock:
+      flags |= TeslaFlagsSP.AP_HYBRID_ACTIVE
+    elif source == TeslaLongitudinalSource.dynamicStock:
+      flags |= TeslaFlagsSP.DYNAMIC_STOCK_ACTIVE
+    elif source == TeslaLongitudinalSource.manualStock:
+      flags |= TeslaFlagsSP.MANUAL_STOCK_ACTIVE
+    return flags
+
   def _read_dyn_params(self):
     """Read dynamic auto-stock params from Params storage."""
     try:
@@ -457,14 +471,7 @@ class CarStateExt:
       if self._dyn_debug_followup_frames % 25 == 0:
         self._log_dynamic_state("followup", ret, speed_kph, remaining_frames=self._dyn_debug_followup_frames)
       self._dyn_debug_followup_frames -= 1
-    if self.tesla_stock_longitudinal_active:
-      ret_sp.flags |= TeslaFlagsSP.STOCK_LONGITUDINAL_ACTIVE.value
-    if self.tesla_ap_hybrid_active:
-      ret_sp.flags |= TeslaFlagsSP.AP_HYBRID_ACTIVE.value
-    elif self._get_longitudinal_source() == TeslaLongitudinalSource.dynamicStock:
-      ret_sp.flags |= TeslaFlagsSP.DYNAMIC_STOCK_ACTIVE.value
-    elif self._get_longitudinal_source() == TeslaLongitudinalSource.manualStock:
-      ret_sp.flags |= TeslaFlagsSP.MANUAL_STOCK_ACTIVE.value
+    ret_sp.flags |= self._longitudinal_source_flags().value
 
     speed_units = self.can_define.dv["DI_state"]["DI_speedUnits"].get(int(cp_party.vl["DI_state"]["DI_speedUnits"]), None)
     speed_limit = cp_ap_party.vl["DAS_status"]["DAS_fusedSpeedLimit"]

@@ -17,7 +17,7 @@ from opendbc.car.tesla.teslacan import TeslaCAN
 from opendbc.car.tesla.values import CANBUS, CAR, FSD_14_FW
 from opendbc.sunnypilot.car.tesla.carstate_ext import CarStateExt, TeslaLongitudinalSource
 from opendbc.sunnypilot.car.tesla import dynamic_acc_debug
-from opendbc.sunnypilot.car.interfaces import _initialize_tesla_ap_hybrid
+from opendbc.sunnypilot.car.interfaces import _initialize_tesla_ap_hybrid, _initialize_tesla_dynamic_auto_stock
 from opendbc.sunnypilot.car.tesla.icbm import IntelligentCruiseButtonManagementInterface, SendButtonState
 from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP, TeslaSafetyFlagsSP
 
@@ -130,6 +130,20 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
 
     self.assertTrue(cp_sp.flags & TeslaFlagsSP.AP_HYBRID)
     self.assertTrue(cp_sp.safetyParam & TeslaSafetyFlagsSP.AP_HYBRID_HANDOFF)
+    self.assertFalse(cp_sp.safetyParam & TeslaSafetyFlagsSP.DYNAMIC_AUTO_STOCK)
+
+  def test_dynamic_thresholds_do_not_overlap_speed_button_permission(self):
+    cp = SimpleNamespace(brand="tesla", openpilotLongitudinalControl=True)
+    cp_sp = SimpleNamespace(flags=0, safetyParam=0)
+
+    _initialize_tesla_dynamic_auto_stock(cp, cp_sp, {
+      "DynamicAutoStock": "1",
+      "DynamicAutoStockSpeedKph": "85",
+      "DynamicAutoStockSpeedLowKph": "70",
+    })
+
+    self.assertEqual(TeslaSafetyFlagsSP.DYNAMIC_AUTO_STOCK, cp_sp.safetyParam)
+    self.assertFalse(cp_sp.safetyParam & TeslaSafetyFlagsSP.SPEED_LIMIT_CRUISE_BUTTONS)
 
   def test_ap_hybrid_initialization_requires_openpilot_longitudinal(self):
     cp = SimpleNamespace(brand="tesla", openpilotLongitudinalControl=False)
@@ -304,6 +318,17 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
     hybrid = self._override_state(TeslaLongitudinalSource.apHybridStock)
     self.assertFalse(hybrid._force_dynamic_stock_to_sp("curve", ret, 80.0))
     self.assertEqual(TeslaLongitudinalSource.apHybridStock, hybrid.tesla_longitudinal_source)
+
+  def test_runtime_flags_encode_each_longitudinal_source(self):
+    expected = {
+      TeslaLongitudinalSource.sp: 0,
+      TeslaLongitudinalSource.dynamicStock: TeslaFlagsSP.STOCK_LONGITUDINAL_ACTIVE | TeslaFlagsSP.DYNAMIC_STOCK_ACTIVE,
+      TeslaLongitudinalSource.manualStock: TeslaFlagsSP.STOCK_LONGITUDINAL_ACTIVE | TeslaFlagsSP.MANUAL_STOCK_ACTIVE,
+      TeslaLongitudinalSource.apHybridStock: TeslaFlagsSP.STOCK_LONGITUDINAL_ACTIVE | TeslaFlagsSP.AP_HYBRID_ACTIVE,
+    }
+    for source, flags in expected.items():
+      car_state = self._override_state(source)
+      self.assertEqual(flags, car_state._longitudinal_source_flags())
 
   def test_ap_hybrid_restores_complete_previous_source(self):
     car_state = self._override_state(TeslaLongitudinalSource.manualStock)
