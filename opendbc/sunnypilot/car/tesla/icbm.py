@@ -8,6 +8,7 @@ See the LICENSE.md file in the root directory for more details.
 from opendbc.car import DT_CTRL, structs
 from opendbc.car.can_definitions import CanData
 from opendbc.sunnypilot.car.intelligent_cruise_button_management_interface_base import IntelligentCruiseButtonManagementInterfaceBase
+from opendbc.sunnypilot.car.tesla.carstate_ext import TeslaLongitudinalSource
 from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP
 
 SendButtonState = structs.IntelligentCruiseButtonManagement.SendButtonState
@@ -32,8 +33,12 @@ class IntelligentCruiseButtonManagementInterface(IntelligentCruiseButtonManageme
     if not (self.CP_SP.flags & TeslaFlagsSP.SPEED_LIMIT_CRUISE_BUTTONS):
       return can_sends
 
-    # Stock ACC owns its set speed while dynamic stock longitudinal is active.
-    if getattr(CS, "tesla_stock_longitudinal_active", False):
+    # Tesla AP already owns automatic speed-limit changes in hybrid mode. Dynamic
+    # and manually selected stock ACC still use ICBM to adjust the OEM set speed.
+    longitudinal_source = getattr(CS, "tesla_longitudinal_source", None)
+    if longitudinal_source == TeslaLongitudinalSource.apHybridStock:
+      return can_sends
+    if longitudinal_source is None and getattr(CS, "tesla_stock_longitudinal_active", False):
       return can_sends
 
     if self.ICBM.sendButton != SendButtonState.none and self.ICBM.sendButton in BUTTONS:

@@ -25,6 +25,7 @@ TESLA_AP_ACTIVE_STATES = frozenset((3, 4, 5, 6))
 TESLA_AP_EXIT_STATES = frozenset((8, 9))
 TESLA_AP_FAULT_STATES = frozenset((14, 15))
 AP_HYBRID_EXIT_GRACE_FRAMES = 100  # 1 second at the 100 Hz carState rate
+AP_HYBRID_EXIT_CONFIRM_SAMPLES = 3
 CURVE_PLAN_SOURCES = frozenset((1, 2))  # LongitudinalPlanSource.sccVision/sccMap
 BLINKER_CONFIRM_S = 0.3
 BLINKER_STALE_S = 0.4
@@ -65,6 +66,9 @@ class CarStateExt:
     self.tesla_ap_hybrid_active = False
     self._ap_hybrid_restore_source = TeslaLongitudinalSource.sp
     self._ap_hybrid_exit_grace_frames = 0
+    self._ap_hybrid_exit_samples = 0
+    self._ap_hybrid_status_counter_last = None
+    self._ap_hybrid_lateral_rejected = False
 
     self._blinker_last_counter = None
     self._blinker_first_active_time = 0.0
@@ -81,6 +85,7 @@ class CarStateExt:
     self._lane_change_active = False
     self._lane_change_valid = False
     self._lane_change_recv_time = 0.0
+    self._lateral_control_ready = False
     self._context_clear_since = None
 
   def _set_longitudinal_source(self, source: TeslaLongitudinalSource) -> None:
@@ -123,12 +128,28 @@ class CarStateExt:
       return False
     return self.tesla_ap_hybrid_active or self._ap_hybrid_exit_grace_frames > 0
 
-  def _update_ap_hybrid(self, ret: structs.CarState, autopilot_state: int, speed_kph: float) -> bool:
+  def _update_ap_hybrid(self, ret: structs.CarState, autopilot_state: int, speed_kph: float,
+                        status_counter: int | None = None, lateral_control_ready: bool = True) -> bool:
     self._ap_hybrid_exit_grace_frames = max(0, self._ap_hybrid_exit_grace_frames - 1)
     autopilot_state = int(autopilot_state)
+    status_sample_updated = status_counter is None or int(status_counter) != self._ap_hybrid_status_counter_last
+    if status_counter is not None:
+      self._ap_hybrid_status_counter_last = int(status_counter)
+
+    current_source = self._get_longitudinal_source()
+    lateral_blocked = (self._ap_hybrid_enabled and current_source != TeslaLongitudinalSource.apHybridStock and
+                       self._is_ap_active_state(autopilot_state) and ret.cruiseState.enabled and
+                       not ret.accFaulted and not lateral_control_ready)
+    if lateral_blocked and not self._ap_hybrid_lateral_rejected:
+      self._log_dynamic_state("ap_hybrid_entry_blocked_lateral", ret, speed_kph,
+                              autopilot_state=autopilot_state)
+    self._ap_hybrid_lateral_rejected = lateral_blocked
+
     requested = (self._ap_hybrid_enabled and self._is_ap_active_state(autopilot_state) and
-                 ret.cruiseState.enabled and not ret.accFaulted)
+                 ret.cruiseState.enabled and not ret.accFaulted and
+                 (current_source == TeslaLongitudinalSource.apHybridStock or lateral_control_ready))
     if requested:
+      self._ap_hybrid_exit_samples = 0
       if self._get_longitudinal_source() != TeslaLongitudinalSource.apHybridStock:
         self._ap_hybrid_restore_source = self._get_longitudinal_source()
         self._set_longitudinal_source(TeslaLongitudinalSource.apHybridStock)
@@ -142,12 +163,23 @@ class CarStateExt:
 
     if (self._get_longitudinal_source() == TeslaLongitudinalSource.apHybridStock and
         autopilot_state in TESLA_AP_EXIT_STATES):
+      self._ap_hybrid_exit_samples = 0
       return True
+
+    if (self._get_longitudinal_source() == TeslaLongitudinalSource.apHybridStock and
+        autopilot_state in (0, 1, 2)):
+      if status_sample_updated:
+        self._ap_hybrid_exit_samples += 1
+      if self._ap_hybrid_exit_samples < AP_HYBRID_EXIT_CONFIRM_SAMPLES:
+        return True
+    else:
+      self._ap_hybrid_exit_samples = 0
 
     if self._get_longitudinal_source() == TeslaLongitudinalSource.apHybridStock:
       restore_source = self._ap_hybrid_restore_source
       self._set_longitudinal_source(restore_source)
       self._ap_hybrid_restore_source = TeslaLongitudinalSource.sp
+      self._ap_hybrid_exit_samples = 0
       self._dyn_enter_frames = 0
       self._dyn_exit_frames = 0
       self._dyn_cooldown_frames = 200
@@ -159,7 +191,8 @@ class CarStateExt:
     return False
 
   def update_longitudinal_context(self, plan_source: int, plan_updated: bool, plan_valid: bool, plan_recv_time: float,
-                                  lane_change_active: bool, lane_change_valid: bool, now: float) -> None:
+                                  lane_change_active: bool, lane_change_valid: bool,
+                                  lateral_control_ready: bool, now: float) -> None:
     if plan_updated:
       plan_source = int(plan_source)
       if plan_valid and plan_source in CURVE_PLAN_SOURCES:
@@ -175,6 +208,7 @@ class CarStateExt:
     self._lane_change_active = bool(lane_change_active)
     self._lane_change_valid = bool(lane_change_valid)
     self._lane_change_recv_time = float(now)
+    self._lateral_control_ready = bool(lateral_control_ready)
     self._refresh_context_clear_since(now)
 
   def _update_blinker_sample(self, active: bool, counter: int, now: float) -> None:
@@ -354,7 +388,10 @@ class CarStateExt:
     now = time.monotonic()
     self._consume_blinker_samples(cp_party, now)
     autopilot_state = int(cp_ap_party.vl["DAS_status"]["DAS_autopilotState"])
-    ap_hybrid_owns_longitudinal = self._update_ap_hybrid(ret, autopilot_state, speed_kph)
+    status_counter = int(cp_ap_party.vl["DAS_status"]["DAS_statusCounter"])
+    ap_hybrid_owns_longitudinal = self._update_ap_hybrid(
+      ret, autopilot_state, speed_kph, status_counter, self._lateral_control_ready,
+    )
 
     # Process the real 4-finger edge before the dynamic state machine so a
     # manual decision always wins when both happen in the same update.
@@ -424,6 +461,10 @@ class CarStateExt:
       ret_sp.flags |= TeslaFlagsSP.STOCK_LONGITUDINAL_ACTIVE.value
     if self.tesla_ap_hybrid_active:
       ret_sp.flags |= TeslaFlagsSP.AP_HYBRID_ACTIVE.value
+    elif self._get_longitudinal_source() == TeslaLongitudinalSource.dynamicStock:
+      ret_sp.flags |= TeslaFlagsSP.DYNAMIC_STOCK_ACTIVE.value
+    elif self._get_longitudinal_source() == TeslaLongitudinalSource.manualStock:
+      ret_sp.flags |= TeslaFlagsSP.MANUAL_STOCK_ACTIVE.value
 
     speed_units = self.can_define.dv["DI_state"]["DI_speedUnits"].get(int(cp_party.vl["DI_state"]["DI_speedUnits"]), None)
     speed_limit = cp_ap_party.vl["DAS_status"]["DAS_fusedSpeedLimit"]

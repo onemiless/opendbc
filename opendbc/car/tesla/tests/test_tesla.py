@@ -18,6 +18,7 @@ from opendbc.car.tesla.values import CANBUS, CAR, FSD_14_FW
 from opendbc.sunnypilot.car.tesla.carstate_ext import CarStateExt, TeslaLongitudinalSource
 from opendbc.sunnypilot.car.tesla import dynamic_acc_debug
 from opendbc.sunnypilot.car.interfaces import _initialize_tesla_ap_hybrid
+from opendbc.sunnypilot.car.tesla.icbm import IntelligentCruiseButtonManagementInterface, SendButtonState
 from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP, TeslaSafetyFlagsSP
 
 Ecu = CarParams.Ecu
@@ -273,18 +274,18 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
 
   def test_curve_request_counts_only_new_fresh_plan_samples(self):
     car_state = self._override_state()
-    car_state.update_longitudinal_context(1, True, True, 2.00, False, True, 2.00)
-    car_state.update_longitudinal_context(1, False, True, 2.00, False, True, 2.01)
+    car_state.update_longitudinal_context(1, True, True, 2.00, False, True, True, 2.00)
+    car_state.update_longitudinal_context(1, False, True, 2.00, False, True, True, 2.01)
     self.assertFalse(car_state._curve_force_active(2.01))
 
-    car_state.update_longitudinal_context(1, True, True, 2.05, False, True, 2.05)
+    car_state.update_longitudinal_context(1, True, True, 2.05, False, True, True, 2.05)
     self.assertTrue(car_state._curve_force_active(2.05))
     self.assertFalse(car_state._curve_force_active(2.26))
     self.assertFalse(car_state._external_context_clear(2.26))
 
-    car_state.update_longitudinal_context(1, True, True, 2.50, False, True, 2.50)
+    car_state.update_longitudinal_context(1, True, True, 2.50, False, True, True, 2.50)
     self.assertFalse(car_state._curve_force_active(2.50))
-    car_state.update_longitudinal_context(1, True, True, 2.55, False, True, 2.55)
+    car_state.update_longitudinal_context(1, True, True, 2.55, False, True, True, 2.55)
     self.assertTrue(car_state._curve_force_active(2.55))
 
   def test_force_sp_only_overrides_dynamic_stock(self):
@@ -314,6 +315,8 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
     self.assertTrue(car_state._update_ap_hybrid(ret, 3, 80.0))
     self.assertEqual(TeslaLongitudinalSource.apHybridStock, car_state.tesla_longitudinal_source)
 
+    self.assertTrue(car_state._update_ap_hybrid(ret, 2, 80.0))
+    self.assertTrue(car_state._update_ap_hybrid(ret, 2, 80.0))
     self.assertFalse(car_state._update_ap_hybrid(ret, 2, 80.0))
     self.assertEqual(TeslaLongitudinalSource.manualStock, car_state.tesla_longitudinal_source)
 
@@ -328,6 +331,8 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
       self.assertTrue(car_state._update_ap_hybrid(ret, autopilot_state, 80.0))
       self.assertEqual(TeslaLongitudinalSource.apHybridStock, car_state.tesla_longitudinal_source)
 
+    self.assertTrue(car_state._update_ap_hybrid(ret, 2, 80.0))
+    self.assertTrue(car_state._update_ap_hybrid(ret, 2, 80.0))
     self.assertFalse(car_state._update_ap_hybrid(ret, 2, 80.0))
     self.assertEqual(TeslaLongitudinalSource.sp, car_state.tesla_longitudinal_source)
     self.assertTrue(car_state._ap_hybrid_lkas_suppressed())
@@ -336,6 +341,54 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
       self.assertFalse(car_state._update_ap_hybrid(ret, 2, 80.0))
     self.assertFalse(car_state._ap_hybrid_lkas_suppressed())
     self.assertFalse(car_state._ap_hybrid_lkas_suppressed(14))
+
+  def test_ap_hybrid_exit_requires_three_distinct_stable_status_samples(self):
+    car_state = self._override_state(TeslaLongitudinalSource.sp)
+    car_state._ap_hybrid_enabled = True
+    ret = SimpleNamespace(brakePressed=False, gasPressed=False, accFaulted=False,
+                          aEgo=0.0, cruiseState=SimpleNamespace(enabled=True, available=True))
+
+    self.assertTrue(car_state._update_ap_hybrid(ret, 3, 80.0, status_counter=1))
+    self.assertTrue(car_state._update_ap_hybrid(ret, 2, 80.0, status_counter=2))
+    self.assertTrue(car_state._update_ap_hybrid(ret, 2, 80.0, status_counter=2))  # cached parser value
+    self.assertTrue(car_state._update_ap_hybrid(ret, 2, 80.0, status_counter=3))
+    self.assertFalse(car_state._update_ap_hybrid(ret, 2, 80.0, status_counter=4))
+
+  def test_ap_hybrid_available_flicker_does_not_change_source(self):
+    car_state = self._override_state(TeslaLongitudinalSource.dynamicStock)
+    car_state._ap_hybrid_enabled = True
+    ret = SimpleNamespace(brakePressed=False, gasPressed=False, accFaulted=False,
+                          aEgo=0.0, cruiseState=SimpleNamespace(enabled=True, available=True))
+
+    self.assertTrue(car_state._update_ap_hybrid(ret, 3, 80.0, status_counter=1))
+    self.assertTrue(car_state._update_ap_hybrid(ret, 2, 80.0, status_counter=2))
+    self.assertTrue(car_state._update_ap_hybrid(ret, 4, 80.0, status_counter=3))
+    self.assertEqual(TeslaLongitudinalSource.apHybridStock, car_state.tesla_longitudinal_source)
+    self.assertEqual(TeslaLongitudinalSource.dynamicStock, car_state._ap_hybrid_restore_source)
+
+  def test_ap_hybrid_entry_requires_lateral_control(self):
+    car_state = self._override_state(TeslaLongitudinalSource.sp)
+    car_state._ap_hybrid_enabled = True
+    ret = SimpleNamespace(brakePressed=False, gasPressed=False, accFaulted=False,
+                          aEgo=0.0, cruiseState=SimpleNamespace(enabled=True, available=True))
+
+    self.assertFalse(car_state._update_ap_hybrid(ret, 3, 80.0, lateral_control_ready=False))
+    self.assertEqual(TeslaLongitudinalSource.sp, car_state.tesla_longitudinal_source)
+    self.assertTrue(car_state._update_ap_hybrid(ret, 3, 80.0, lateral_control_ready=True))
+
+  def test_speed_limit_buttons_distinguish_stock_longitudinal_source(self):
+    interface = IntelligentCruiseButtonManagementInterface.__new__(IntelligentCruiseButtonManagementInterface)
+    interface.CP_SP = SimpleNamespace(flags=TeslaFlagsSP.SPEED_LIMIT_CRUISE_BUTTONS)
+    interface.button_frame = 0
+    cc_sp = SimpleNamespace(intelligentCruiseButtonManagement=SimpleNamespace(sendButton=SendButtonState.increase))
+    tesla_can = SimpleNamespace(create_stw_action_request=lambda button, counter: (button, counter))
+
+    for source, expected_count in ((TeslaLongitudinalSource.dynamicStock, 1),
+                                   (TeslaLongitudinalSource.manualStock, 1),
+                                   (TeslaLongitudinalSource.apHybridStock, 0)):
+      cs = SimpleNamespace(tesla_stock_longitudinal_active=True, tesla_longitudinal_source=source, stw_action_counter=1)
+      sends = interface.update(cc_sp, cs, tesla_can, frame=100, last_button_frame=0)
+      self.assertEqual(expected_count, len(sends), source)
 
   def test_ap_hybrid_ignores_dynamic_force_requests(self):
     car_state = self._override_state(TeslaLongitudinalSource.apHybridStock)
@@ -352,15 +405,15 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
     car_state = self._override_state()
     for index in range(10):
       now = 3.0 + index * 0.1
-      car_state.update_longitudinal_context(0, True, True, now, False, True, now)
+      car_state.update_longitudinal_context(0, True, True, now, False, True, True, now)
       car_state._update_blinker_sample(False, index, now)
     self.assertFalse(car_state._stock_return_context_ready(3.99))
-    car_state.update_longitudinal_context(0, True, True, 4.0, False, True, 4.0)
+    car_state.update_longitudinal_context(0, True, True, 4.0, False, True, True, 4.0)
     car_state._update_blinker_sample(False, 10, 4.0)
     self.assertTrue(car_state._stock_return_context_ready(4.0))
 
-    car_state.update_longitudinal_context(1, True, True, 4.01, False, True, 4.01)
-    car_state.update_longitudinal_context(1, True, True, 4.06, False, True, 4.06)
+    car_state.update_longitudinal_context(1, True, True, 4.01, False, True, True, 4.01)
+    car_state.update_longitudinal_context(1, True, True, 4.06, False, True, True, 4.06)
     self.assertFalse(car_state._stock_return_context_ready(4.06))
 
   def test_counter_resyncs_after_each_stock_period(self):

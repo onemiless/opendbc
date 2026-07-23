@@ -18,6 +18,8 @@ class TeslaFlagsSP(IntFlag):
   SPEED_LIMIT_CRUISE_BUTTONS = 128
   AP_HYBRID = 256  # Config: stock AP longitudinal with sunnypilot lateral control
   AP_HYBRID_ACTIVE = 512  # Runtime: AP hybrid arbitration currently owns longitudinal selection
+  DYNAMIC_STOCK_ACTIVE = 1024  # Runtime source: Dynamic ACC selected stock longitudinal
+  MANUAL_STOCK_ACTIVE = 2048  # Runtime source: 4-finger selection chose stock longitudinal
 
 
 class MadsScreenButtonType:
@@ -34,7 +36,9 @@ class TeslaSafetyFlagsSP:
   MADS_SCREEN_BUTTON_5_FINGER = 8
   DYNAMIC_AUTO_STOCK = 16
   SPEED_LIMIT_CRUISE_BUTTONS = 32
-  AP_HYBRID_HANDOFF = DYNAMIC_AUTO_STOCK  # Reuse the atomic stock-longitudinal handoff permission
+  # Intentional capability alias: safety only authorizes the same atomic stock-longitudinal
+  # handoff for both features. The reason/source remains a Python and CarStateSP concern.
+  AP_HYBRID_HANDOFF = DYNAMIC_AUTO_STOCK
   DYNAMIC_AUTO_STOCK_HIGH_SHIFT = 5
   DYNAMIC_AUTO_STOCK_LOW_SHIFT = 10
   DYNAMIC_AUTO_STOCK_THRESHOLD_MASK = 0x1f
