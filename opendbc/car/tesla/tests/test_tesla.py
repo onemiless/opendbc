@@ -317,6 +317,26 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
     self.assertFalse(car_state._update_ap_hybrid(ret, 2, 80.0))
     self.assertEqual(TeslaLongitudinalSource.manualStock, car_state.tesla_longitudinal_source)
 
+  def test_ap_hybrid_stays_active_through_oem_exit_states(self):
+    car_state = self._override_state(TeslaLongitudinalSource.sp)
+    car_state._ap_hybrid_enabled = True
+    ret = SimpleNamespace(brakePressed=False, gasPressed=False, accFaulted=False,
+                          aEgo=0.0, cruiseState=SimpleNamespace(enabled=True, available=True))
+
+    self.assertTrue(car_state._update_ap_hybrid(ret, 3, 80.0))
+    for autopilot_state in (8, 9):
+      self.assertTrue(car_state._update_ap_hybrid(ret, autopilot_state, 80.0))
+      self.assertEqual(TeslaLongitudinalSource.apHybridStock, car_state.tesla_longitudinal_source)
+
+    self.assertFalse(car_state._update_ap_hybrid(ret, 2, 80.0))
+    self.assertEqual(TeslaLongitudinalSource.sp, car_state.tesla_longitudinal_source)
+    self.assertTrue(car_state._ap_hybrid_lkas_suppressed())
+
+    for _ in range(100):
+      self.assertFalse(car_state._update_ap_hybrid(ret, 2, 80.0))
+    self.assertFalse(car_state._ap_hybrid_lkas_suppressed())
+    self.assertFalse(car_state._ap_hybrid_lkas_suppressed(14))
+
   def test_ap_hybrid_ignores_dynamic_force_requests(self):
     car_state = self._override_state(TeslaLongitudinalSource.apHybridStock)
     car_state._ap_hybrid_enabled = True

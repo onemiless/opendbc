@@ -22,6 +22,9 @@ DYNAMIC_STOCK_MAX_ACCEL_ERROR = 0.7
 DYNAMIC_STOCK_MAX_ACCEL_MAX = 1.0
 DYNAMIC_STOCK_MAX_EGO_ACCEL = 0.35
 TESLA_AP_ACTIVE_STATES = frozenset((3, 4, 5, 6))
+TESLA_AP_EXIT_STATES = frozenset((8, 9))
+TESLA_AP_FAULT_STATES = frozenset((14, 15))
+AP_HYBRID_EXIT_GRACE_FRAMES = 100  # 1 second at the 100 Hz carState rate
 CURVE_PLAN_SOURCES = frozenset((1, 2))  # LongitudinalPlanSource.sccVision/sccMap
 BLINKER_CONFIRM_S = 0.3
 BLINKER_STALE_S = 0.4
@@ -61,6 +64,7 @@ class CarStateExt:
     self.tesla_stock_longitudinal_active = False
     self.tesla_ap_hybrid_active = False
     self._ap_hybrid_restore_source = TeslaLongitudinalSource.sp
+    self._ap_hybrid_exit_grace_frames = 0
 
     self._blinker_last_counter = None
     self._blinker_first_active_time = 0.0
@@ -114,7 +118,14 @@ class CarStateExt:
   def _is_ap_active_state(autopilot_state: int) -> bool:
     return int(autopilot_state) in TESLA_AP_ACTIVE_STATES
 
+  def _ap_hybrid_lkas_suppressed(self, autopilot_state: int | None = None) -> bool:
+    if autopilot_state is not None and int(autopilot_state) in TESLA_AP_FAULT_STATES:
+      return False
+    return self.tesla_ap_hybrid_active or self._ap_hybrid_exit_grace_frames > 0
+
   def _update_ap_hybrid(self, ret: structs.CarState, autopilot_state: int, speed_kph: float) -> bool:
+    self._ap_hybrid_exit_grace_frames = max(0, self._ap_hybrid_exit_grace_frames - 1)
+    autopilot_state = int(autopilot_state)
     requested = (self._ap_hybrid_enabled and self._is_ap_active_state(autopilot_state) and
                  ret.cruiseState.enabled and not ret.accFaulted)
     if requested:
@@ -129,6 +140,10 @@ class CarStateExt:
                                 restore_source=str(self._ap_hybrid_restore_source), autopilot_state=int(autopilot_state))
       return True
 
+    if (self._get_longitudinal_source() == TeslaLongitudinalSource.apHybridStock and
+        autopilot_state in TESLA_AP_EXIT_STATES):
+      return True
+
     if self._get_longitudinal_source() == TeslaLongitudinalSource.apHybridStock:
       restore_source = self._ap_hybrid_restore_source
       self._set_longitudinal_source(restore_source)
@@ -137,6 +152,8 @@ class CarStateExt:
       self._dyn_exit_frames = 0
       self._dyn_cooldown_frames = 200
       self._dyn_debug_followup_frames = 200
+      if autopilot_state in (0, 1, 2):
+        self._ap_hybrid_exit_grace_frames = AP_HYBRID_EXIT_GRACE_FRAMES
       self._log_dynamic_state("ap_hybrid_exit", ret, speed_kph,
                               restore_source=str(restore_source), autopilot_state=int(autopilot_state))
     return False

@@ -169,17 +169,19 @@ class CarState(CarStateBase, CarStateExt):
     # LKAS switched from LANE_KEEP_ASSIST to ANGLE_CONTROL to likely allow overriding LKAS events smoothly
     lkas_ctrl_type = get_steer_ctrl_type(self.CP.flags, 2)
     ret.stockLkas = cp_ap_party.vl["DAS_steeringControl"]["DAS_steeringControlType"] == lkas_ctrl_type  # LANE_KEEP_ASSIST
+    autopilot_state = int(cp_ap_party.vl["DAS_status"]["DAS_autopilotState"])
+    suppress_invalid_lkas = self._ap_hybrid_lkas_suppressed(autopilot_state)
 
     # Stock Autosteer should be disengaged (includes FSD)
     # TODO: find for TESLA_MODEL_X and HW2.5 vehicles
     if not (self.CP.flags & TeslaFlags.MISSING_DAS_SETTINGS):
-      ret.invalidLkasSetting = cp_ap_party.vl["DAS_status"]["DAS_autopilotState"] not in (0, 1, 2) # DISABLED, UNAVAILABLE, AVAILABLE
+      ret.invalidLkasSetting = autopilot_state not in (0, 1, 2) # DISABLED, UNAVAILABLE, AVAILABLE
 
       # Because we don't have FSD 14 detection outside of a set of FW, we should check if this FW is accidentally missing from FSD_14_FW
       # 1. If in Autosteer or FSD, already caught by invalidLkasSetting
       # 2. If in TACC and DAS ever sends ANGLE_CONTROL (1), we can infer it's trying to do LKAS on FSD 14+
       angle_control = cp_ap_party.vl["DAS_steeringControl"]["DAS_steeringControlType"] == 1  # ANGLE_CONTROL
-      if not ret.invalidLkasSetting and angle_control and not self.CP.flags & TeslaFlags.FSD_14:
+      if not suppress_invalid_lkas and not ret.invalidLkasSetting and angle_control and not self.CP.flags & TeslaFlags.FSD_14:
         self.suspected_fsd14 = True
 
       if self.suspected_fsd14:
@@ -196,7 +198,7 @@ class CarState(CarStateBase, CarStateExt):
     CarStateExt.update(self, ret, ret_sp, can_parsers)
     # AP hybrid deliberately leaves Tesla AP active for longitudinal control.
     # Clear this at the source to avoid a carState/carStateSP publication race.
-    if self.tesla_ap_hybrid_active:
+    if suppress_invalid_lkas or self._ap_hybrid_lkas_suppressed(autopilot_state):
       ret.invalidLkasSetting = False
 
     return ret, ret_sp
