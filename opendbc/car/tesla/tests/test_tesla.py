@@ -132,6 +132,26 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
     self.assertTrue(cp_sp.safetyParam & TeslaSafetyFlagsSP.AP_HYBRID_HANDOFF)
     self.assertFalse(cp_sp.safetyParam & TeslaSafetyFlagsSP.DYNAMIC_AUTO_STOCK)
 
+  def test_dynamic_ap_longitudinal_initialization_requires_ap_hybrid(self):
+    cp = SimpleNamespace(brand="tesla", openpilotLongitudinalControl=True)
+    cp_sp = SimpleNamespace(flags=0, safetyParam=0)
+
+    _initialize_tesla_ap_hybrid(cp, cp_sp, {
+      "TeslaApHybrid": "0",
+      "TeslaDynamicApLongitudinal": "1",
+    })
+    self.assertFalse(cp_sp.flags & TeslaFlagsSP.DYNAMIC_AP_LONGITUDINAL)
+    self.assertFalse(cp_sp.safetyParam & TeslaSafetyFlagsSP.AP_HYBRID_HANDOFF)
+
+    _initialize_tesla_ap_hybrid(cp, cp_sp, {
+      "TeslaApHybrid": "1",
+      "TeslaDynamicApLongitudinal": "1",
+    })
+
+    self.assertTrue(cp_sp.flags & TeslaFlagsSP.AP_HYBRID)
+    self.assertTrue(cp_sp.flags & TeslaFlagsSP.DYNAMIC_AP_LONGITUDINAL)
+    self.assertTrue(cp_sp.safetyParam & TeslaSafetyFlagsSP.AP_HYBRID_HANDOFF)
+
   def test_dynamic_thresholds_do_not_overlap_speed_button_permission(self):
     cp = SimpleNamespace(brand="tesla", openpilotLongitudinalControl=True)
     cp_sp = SimpleNamespace(flags=0, safetyParam=0)
@@ -184,6 +204,7 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
     car_state._dyn_exit_frames = 10
     car_state._dyn_manual_override = False
     car_state._dyn_manual_saw_sp_off = False
+    car_state._ap_dynamic_long_enabled = False
     car_state.das_control = {
       "DAS_setSpeed": 80.0,
       "DAS_accState": acc_state,
@@ -252,6 +273,7 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
     car_state._dyn_debug_followup_frames = 0
     car_state._dyn_manual_override = False
     car_state._dyn_manual_saw_sp_off = False
+    car_state._ap_dynamic_long_enabled = False
     car_state.das_control = {
       "DAS_accState": 4,
       "DAS_setSpeed": 80.0,
@@ -329,6 +351,39 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
     for source, flags in expected.items():
       car_state = self._override_state(source)
       self.assertEqual(flags, car_state._longitudinal_source_flags())
+
+    dynamic_ap_sp = self._override_state(TeslaLongitudinalSource.sp)
+    dynamic_ap_sp.tesla_ap_hybrid_active = True
+    self.assertEqual(TeslaFlagsSP.AP_HYBRID_ACTIVE, dynamic_ap_sp._longitudinal_source_flags())
+
+  def test_dynamic_ap_switches_longitudinal_source_with_speed_hysteresis(self):
+    car_state = self._override_state(TeslaLongitudinalSource.manualStock)
+    car_state._ap_hybrid_enabled = True
+    car_state._ap_dynamic_long_enabled = True
+    car_state._dyn_high = 80
+    car_state._dyn_low = 70
+    ret = SimpleNamespace(brakePressed=False, gasPressed=False, accFaulted=False,
+                          aEgo=0.0, cruiseState=SimpleNamespace(enabled=True, available=True))
+
+    self.assertTrue(car_state._update_ap_hybrid(ret, 3, 60.0, status_counter=1))
+    self.assertTrue(car_state.tesla_ap_hybrid_active)
+    self.assertEqual(TeslaLongitudinalSource.sp, car_state.tesla_longitudinal_source)
+    self.assertTrue(car_state._ap_hybrid_lkas_suppressed())
+
+    for counter in range(2, 102):
+      self.assertTrue(car_state._update_ap_hybrid(ret, 3, 90.0, status_counter=counter % 16))
+    self.assertEqual(TeslaLongitudinalSource.apHybridStock, car_state.tesla_longitudinal_source)
+
+    for counter in range(102, 202):
+      self.assertTrue(car_state._update_ap_hybrid(ret, 3, 60.0, status_counter=counter % 16))
+    self.assertTrue(car_state.tesla_ap_hybrid_active)
+    self.assertEqual(TeslaLongitudinalSource.sp, car_state.tesla_longitudinal_source)
+
+    for counter in (10, 11, 12):
+      active = car_state._update_ap_hybrid(ret, 2, 60.0, status_counter=counter)
+    self.assertFalse(active)
+    self.assertFalse(car_state.tesla_ap_hybrid_active)
+    self.assertEqual(TeslaLongitudinalSource.manualStock, car_state.tesla_longitudinal_source)
 
   def test_ap_hybrid_restores_complete_previous_source(self):
     car_state = self._override_state(TeslaLongitudinalSource.manualStock)

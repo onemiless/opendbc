@@ -196,8 +196,9 @@ class CarState(CarStateBase, CarStateExt):
     self.das_control = copy.copy(cp_ap_party.vl["DAS_control"])
 
     CarStateExt.update(self, ret, ret_sp, can_parsers)
-    # AP hybrid deliberately leaves Tesla AP active for longitudinal control.
-    # Clear this at the source to avoid a carState/carStateSP publication race.
+    # An AP hybrid session deliberately leaves Tesla AP active while SP may own
+    # longitudinal control. Clear this at the source to avoid a
+    # carState/carStateSP publication race.
     if suppress_invalid_lkas or self._ap_hybrid_lkas_suppressed(autopilot_state):
       ret.invalidLkasSetting = False
 
