@@ -22,6 +22,7 @@ class TeslaFlagsSP(IntFlag):
   MANUAL_STOCK_ACTIVE = 2048  # Runtime source: 4-finger selection chose stock longitudinal
   DYNAMIC_AP_LONGITUDINAL = 4096  # Config: switch AP longitudinal between SP and OEM using speed hysteresis
   AP_HYBRID_STOCK_LATERAL_ACTIVE = 8192  # Runtime: Tesla AP owns lateral control
+  AP_HYBRID_EXIT_RECOVERY_ACTIVE = 16384  # Runtime: preserve MADS while Tesla AP/LKAS settles after exit
 
 
 class MadsScreenButtonType:
