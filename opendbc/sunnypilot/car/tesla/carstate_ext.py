@@ -24,7 +24,6 @@ DYNAMIC_STOCK_MAX_EGO_ACCEL = 0.35
 TESLA_AP_ACTIVE_STATES = frozenset((3, 4, 5, 6))
 TESLA_AP_EXIT_STATES = frozenset((8, 9))
 TESLA_AP_FAULT_STATES = frozenset((14, 15))
-AP_HYBRID_EXIT_GRACE_FRAMES = 100  # 1 second at the 100 Hz carState rate
 AP_HYBRID_EXIT_CONFIRM_SAMPLES = 3
 AP_DYNAMIC_LONG_SWITCH_CONFIRM_FRAMES = 100
 AP_DYNAMIC_LATERAL_RESUME_CONFIRM_FRAMES = 100
@@ -70,7 +69,7 @@ class CarStateExt:
     self.tesla_ap_hybrid_active = False
     self.tesla_stock_lateral_active = False
     self._ap_hybrid_restore_source = TeslaLongitudinalSource.sp
-    self._ap_hybrid_exit_grace_frames = 0
+    self._ap_hybrid_exit_recovery_active = False
     self._ap_hybrid_exit_samples = 0
     self._ap_hybrid_status_counter_last = None
     self._ap_hybrid_lateral_rejected = False
@@ -133,12 +132,16 @@ class CarStateExt:
       self._ap_hybrid_enabled = p.get_bool("TeslaApHybrid") and bool(self.CP_SP.flags & TeslaFlagsSP.AP_HYBRID)
       self._ap_dynamic_long_enabled = (p.get_bool("TeslaDynamicApLongitudinal") and
                                        bool(self.CP_SP.flags & TeslaFlagsSP.DYNAMIC_AP_LONGITUDINAL))
+      self._dyn_blinker_to_sp_enabled = p.get_bool("DynamicAutoStockBlinkerToSP")
+      self._dyn_curve_to_sp_enabled = p.get_bool("DynamicAutoStockCurveToSP")
       self._dyn_high = max(0, min(155, int(p.get("DynamicAutoStockSpeedKph", return_default=True) or 80)))
       self._dyn_low = max(0, min(155, int(p.get("DynamicAutoStockSpeedLowKph", return_default=True) or 70)))
     except Exception:
       self._dyn_enabled = False
       self._ap_hybrid_enabled = False
       self._ap_dynamic_long_enabled = False
+      self._dyn_blinker_to_sp_enabled = True
+      self._dyn_curve_to_sp_enabled = True
       self._dyn_high = 80
       self._dyn_low = 70
     self._dyn_high = (self._dyn_high // 5) * 5
@@ -155,7 +158,7 @@ class CarStateExt:
   def _ap_hybrid_lkas_suppressed(self, autopilot_state: int | None = None) -> bool:
     if autopilot_state is not None and int(autopilot_state) in TESLA_AP_FAULT_STATES:
       return False
-    return self.tesla_ap_hybrid_active or self._ap_hybrid_exit_grace_frames > 0
+    return self.tesla_ap_hybrid_active or self._ap_hybrid_exit_recovery_active
 
   def _update_ap_dynamic_longitudinal(self, ret: structs.CarState, speed_kph: float, autopilot_state: int) -> None:
     if not self._ap_dynamic_long_enabled:
@@ -218,8 +221,10 @@ class CarStateExt:
 
   def _update_ap_hybrid(self, ret: structs.CarState, autopilot_state: int, speed_kph: float,
                         status_counter: int | None = None, lateral_control_ready: bool = True) -> bool:
-    self._ap_hybrid_exit_grace_frames = max(0, self._ap_hybrid_exit_grace_frames - 1)
     autopilot_state = int(autopilot_state)
+    if (self._ap_hybrid_exit_recovery_active and
+        (autopilot_state in (0, 1, 2) or autopilot_state in TESLA_AP_FAULT_STATES)):
+      self._ap_hybrid_exit_recovery_active = False
     status_sample_updated = status_counter is None or int(status_counter) != self._ap_hybrid_status_counter_last
     if status_counter is not None:
       self._ap_hybrid_status_counter_last = int(status_counter)
@@ -238,6 +243,7 @@ class CarStateExt:
     if requested:
       self._ap_hybrid_exit_samples = 0
       if not self.tesla_ap_hybrid_active:
+        self._ap_hybrid_exit_recovery_active = False
         self._ap_hybrid_restore_source = self._get_longitudinal_source()
         self.tesla_ap_hybrid_active = True
         initial_source = (TeslaLongitudinalSource.sp if self._ap_dynamic_long_enabled and speed_kph < self._dyn_high
@@ -290,10 +296,11 @@ class CarStateExt:
       self._dyn_exit_frames = 0
       self._dyn_cooldown_frames = 200
       self._dyn_debug_followup_frames = 200
-      if autopilot_state not in TESLA_AP_FAULT_STATES:
-        self._ap_hybrid_exit_grace_frames = AP_HYBRID_EXIT_GRACE_FRAMES
+      self._ap_hybrid_exit_recovery_active = (autopilot_state not in (0, 1, 2) and
+                                              autopilot_state not in TESLA_AP_FAULT_STATES)
       self._log_dynamic_state("ap_hybrid_exit", ret, speed_kph,
-                              restore_source=str(restore_source), autopilot_state=int(autopilot_state))
+                              restore_source=str(restore_source), autopilot_state=int(autopilot_state),
+                              exit_recovery_active=self._ap_hybrid_exit_recovery_active)
     return False
 
   def update_longitudinal_context(self, plan_source: int, plan_updated: bool, plan_valid: bool, plan_recv_time: float,
@@ -368,9 +375,12 @@ class CarStateExt:
     return self._lane_change_valid and now - self._lane_change_recv_time <= LANE_CHANGE_STALE_S
 
   def _external_context_clear(self, now: float) -> bool:
-    plan_clear = self._plan_fresh(now) and self._plan_source not in CURVE_PLAN_SOURCES
-    lane_clear = self._lane_change_fresh(now) and not self._lane_change_active
-    return self._blinker_known_inactive(now) and plan_clear and lane_clear
+    blinker_clear = not self._dyn_blinker_to_sp_enabled or self._blinker_known_inactive(now)
+    plan_clear = (not self._dyn_curve_to_sp_enabled or
+                  (self._plan_fresh(now) and self._plan_source not in CURVE_PLAN_SOURCES))
+    lane_clear = (not self._dyn_blinker_to_sp_enabled or
+                  (self._lane_change_fresh(now) and not self._lane_change_active))
+    return blinker_clear and plan_clear and lane_clear
 
   def _refresh_context_clear_since(self, now: float) -> None:
     if self._external_context_clear(now):
@@ -384,9 +394,9 @@ class CarStateExt:
     return self._context_clear_since is not None and now - self._context_clear_since >= LATERAL_STABLE_S
 
   def _force_sp_reason(self, now: float) -> str | None:
-    if self._blinker_force_active(now):
+    if self._dyn_blinker_to_sp_enabled and self._blinker_force_active(now):
       return "blinker"
-    if self._curve_force_active(now):
+    if self._dyn_curve_to_sp_enabled and self._curve_force_active(now):
       return "visionCurve" if self._plan_source == 1 else "mapCurve"
     return None
 
@@ -447,6 +457,7 @@ class CarStateExt:
       stock_active=self.tesla_stock_longitudinal_active,
       longitudinal_source=str(self._get_longitudinal_source()),
       ap_hybrid_active=getattr(self, "tesla_ap_hybrid_active", False),
+      ap_exit_recovery_active=getattr(self, "_ap_hybrid_exit_recovery_active", False),
       ap_dynamic_long_enabled=getattr(self, "_ap_dynamic_long_enabled", False),
       ap_dynamic_to_stock_frames=getattr(self, "_ap_dynamic_to_stock_frames", 0),
       ap_dynamic_to_sp_frames=getattr(self, "_ap_dynamic_to_sp_frames", 0),
