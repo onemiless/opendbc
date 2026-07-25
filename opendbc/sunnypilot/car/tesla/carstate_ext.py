@@ -28,7 +28,7 @@ AP_HYBRID_EXIT_CONFIRM_SAMPLES = 3
 AP_HYBRID_EXIT_RECOVERY_CONFIRM_SAMPLES = 5
 AP_DYNAMIC_LONG_SWITCH_CONFIRM_FRAMES = 100
 AP_DYNAMIC_LONG_SWITCH_COOLDOWN_FRAMES = 100
-AP_DYNAMIC_LONG_MAX_ACCEL_DELTA = 0.5
+AP_DYNAMIC_LONG_ACCEL_ENVELOPE_TOLERANCE = 0.5
 AP_DYNAMIC_LATERAL_RESUME_CONFIRM_FRAMES = 100
 AP_DYNAMIC_LATERAL_OVERRIDE_TORQUE = 0.5
 TESLA_AUTO_LANE_CHANGE_HOLD_STATES = frozenset(range(6, 15))
@@ -179,16 +179,25 @@ class CarStateExt:
       return 0.0
     return (float(das["DAS_accelMin"]) + float(das["DAS_accelMax"])) / 2.0
 
-  def _ap_dynamic_accel_matched(self) -> bool:
-    return (self._sp_longitudinal_context_valid and self._sp_long_active and
-            abs(self._stock_accel_midpoint() - self._sp_requested_accel) <= AP_DYNAMIC_LONG_MAX_ACCEL_DELTA)
+  def _ap_dynamic_accel_compatible(self) -> bool:
+    if not self._sp_longitudinal_context_valid or not self._sp_long_active:
+      return False
+
+    das = getattr(self, "das_control", None)
+    if das is None:
+      return False
+
+    accel_min = min(float(das["DAS_accelMin"]), float(das["DAS_accelMax"]))
+    accel_max = max(float(das["DAS_accelMin"]), float(das["DAS_accelMax"]))
+    return (accel_min - AP_DYNAMIC_LONG_ACCEL_ENVELOPE_TOLERANCE <= self._sp_requested_accel <=
+            accel_max + AP_DYNAMIC_LONG_ACCEL_ENVELOPE_TOLERANCE)
 
   def _ap_dynamic_stock_ready(self, ret: structs.CarState, speed_kph: float) -> bool:
-    return self._stock_longitudinal_ready(ret, speed_kph) and self._ap_dynamic_accel_matched()
+    return self._stock_longitudinal_ready(ret, speed_kph) and self._ap_dynamic_accel_compatible()
 
   def _ap_dynamic_sp_ready(self, ret: structs.CarState) -> bool:
     return (not ret.brakePressed and not ret.gasPressed and ret.cruiseState.enabled and
-            not ret.accFaulted and self._ap_dynamic_accel_matched())
+            not ret.accFaulted and self._ap_dynamic_accel_compatible())
 
   def _update_ap_dynamic_longitudinal(self, ret: structs.CarState, speed_kph: float, autopilot_state: int) -> None:
     if not self._ap_dynamic_long_enabled:
@@ -205,9 +214,9 @@ class CarStateExt:
     stock_counter = int(self.das_control["DAS_controlCounter"])
     stock_das_updated = self._stock_counter_last is None or stock_counter != self._stock_counter_last
     self._stock_counter_last = stock_counter
-    request_stock = (source != TeslaLongitudinalSource.apHybridStock and speed_kph > self._dyn_high and
+    request_stock = (source != TeslaLongitudinalSource.apHybridStock and speed_kph >= self._dyn_high and
                      self._ap_dynamic_stock_ready(ret, speed_kph))
-    request_sp = (source == TeslaLongitudinalSource.apHybridStock and speed_kph < self._dyn_low and
+    request_sp = (source == TeslaLongitudinalSource.apHybridStock and speed_kph <= self._dyn_low and
                   self._ap_dynamic_sp_ready(ret))
     self._ap_dynamic_to_stock_frames = self._ap_dynamic_to_stock_frames + 1 if request_stock else 0
     self._ap_dynamic_to_sp_frames = self._ap_dynamic_to_sp_frames + 1 if request_sp else 0
@@ -378,9 +387,11 @@ class CarStateExt:
       self._dyn_exit_frames = 0
       self._dyn_cooldown_frames = 200
       self._dyn_debug_followup_frames = 200
-      self._ap_hybrid_exit_recovery_active = (oem_control_active and
-                                              autopilot_state not in (0, 1, 2) and
-                                              autopilot_state not in TESLA_AP_FAULT_STATES)
+      # Every AP session can leave a short tail of OEM ANGLE_CONTROL frames,
+      # even when SP owned both axes at the moment of brake disengagement.
+      # Keep invalid-LKAS filtering active until the OEM state and steering
+      # command have both settled; actual AP fault states remain visible.
+      self._ap_hybrid_exit_recovery_active = autopilot_state not in TESLA_AP_FAULT_STATES
       self._ap_hybrid_exit_recovery_samples = 0
       self._log_dynamic_state("ap_hybrid_exit", ret, speed_kph,
                               restore_source=str(restore_source), autopilot_state=int(autopilot_state),

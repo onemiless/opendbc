@@ -15,7 +15,7 @@ from opendbc.car.tesla.fingerprints import FW_VERSIONS
 from opendbc.car.tesla.radar_interface import RADAR_START_ADDR
 from opendbc.car.tesla.teslacan import TeslaCAN
 from opendbc.car.tesla.values import CANBUS, CAR, FSD_14_FW
-from opendbc.sunnypilot.car.tesla.carstate_ext import CarStateExt, TeslaLongitudinalSource
+from opendbc.sunnypilot.car.tesla.carstate_ext import AP_HYBRID_EXIT_RECOVERY_CONFIRM_SAMPLES, CarStateExt, TeslaLongitudinalSource
 from opendbc.sunnypilot.car.tesla import dynamic_acc_debug
 from opendbc.sunnypilot.car.interfaces import _initialize_tesla_ap_hybrid, _initialize_tesla_dynamic_auto_stock
 from opendbc.sunnypilot.car.tesla.icbm import IntelligentCruiseButtonManagementInterface, SendButtonState
@@ -431,14 +431,15 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
     self.assertFalse(car_state.tesla_ap_hybrid_active)
     self.assertEqual(TeslaLongitudinalSource.manualStock, car_state.tesla_longitudinal_source)
 
-  def test_dynamic_ap_waits_for_matched_oem_acceleration_before_entering_stock(self):
+  def test_dynamic_ap_accepts_compatible_oem_acceleration_envelope(self):
     car_state = self._override_state(TeslaLongitudinalSource.sp)
     car_state._ap_hybrid_enabled = True
     car_state._ap_dynamic_long_enabled = True
     car_state.tesla_ap_hybrid_active = True
     car_state._dyn_high = 80
     car_state._dyn_low = 70
-    car_state.das_control.update(DAS_setSpeed=90.0, DAS_accelMin=-1.2, DAS_accelMax=0.0)
+    car_state.das_control.update(DAS_setSpeed=90.0, DAS_accelMin=-0.6, DAS_accelMax=-0.2)
+    car_state._sp_requested_accel = 0.6
     ret = SimpleNamespace(brakePressed=False, gasPressed=False, accFaulted=False, steeringTorque=0.0,
                           leftBlinker=False, rightBlinker=False,
                           aEgo=0.0, cruiseState=SimpleNamespace(enabled=True, available=True))
@@ -448,11 +449,35 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
       car_state._update_ap_dynamic_longitudinal(ret, 90.0, 3)
     self.assertEqual(TeslaLongitudinalSource.sp, car_state.tesla_longitudinal_source)
 
-    car_state.das_control.update(DAS_accelMin=-0.2, DAS_accelMax=0.2)
+    # DAS_accelMin/Max is an allowed acceleration envelope, not a target whose
+    # midpoint must match SP. The requested 0.6 m/s² is compatible with this
+    # envelope plus the handoff tolerance even though its midpoint is -0.5.
+    car_state.das_control.update(DAS_accelMin=-1.4, DAS_accelMax=0.1)
     for counter in range(100, 200):
       car_state.das_control["DAS_controlCounter"] = counter % 8
       car_state._update_ap_dynamic_longitudinal(ret, 90.0, 3)
     self.assertEqual(TeslaLongitudinalSource.apHybridStock, car_state.tesla_longitudinal_source)
+
+  def test_dynamic_ap_switches_at_inclusive_speed_thresholds(self):
+    car_state = self._override_state(TeslaLongitudinalSource.sp)
+    car_state._ap_dynamic_long_enabled = True
+    car_state.tesla_ap_hybrid_active = True
+    car_state._dyn_high = 45
+    car_state._dyn_low = 40
+    car_state.das_control.update(DAS_setSpeed=45.0, DAS_accelMin=-0.2, DAS_accelMax=0.2)
+    ret = SimpleNamespace(brakePressed=False, gasPressed=False, accFaulted=False, steeringTorque=0.0,
+                          leftBlinker=False, rightBlinker=False,
+                          aEgo=0.0, cruiseState=SimpleNamespace(enabled=True, available=True))
+
+    for counter in range(100):
+      car_state.das_control["DAS_controlCounter"] = counter % 8
+      car_state._update_ap_dynamic_longitudinal(ret, 45.0, 3)
+    self.assertEqual(TeslaLongitudinalSource.apHybridStock, car_state.tesla_longitudinal_source)
+
+    for counter in range(100, 200):
+      car_state.das_control["DAS_controlCounter"] = counter % 8
+      car_state._update_ap_dynamic_longitudinal(ret, 40.0, 3)
+    self.assertEqual(TeslaLongitudinalSource.sp, car_state.tesla_longitudinal_source)
 
   def test_dynamic_ap_waits_for_sp_acceleration_before_leaving_stock(self):
     car_state = self._override_state(TeslaLongitudinalSource.apHybridStock)
@@ -543,7 +568,7 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
     self.assertFalse(car_state._update_ap_hybrid(ret, 2, 40.0, status_counter=2))
     self.assertFalse(car_state._ap_hybrid_lkas_suppressed(2))
 
-  def test_dynamic_ap_sp_only_brake_exit_does_not_start_oem_recovery(self):
+  def test_dynamic_ap_sp_only_brake_exit_suppresses_residual_oem_lkas(self):
     car_state = self._override_state(TeslaLongitudinalSource.sp)
     car_state._ap_hybrid_enabled = True
     car_state._ap_dynamic_long_enabled = True
@@ -554,9 +579,39 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
                           aEgo=-0.5, cruiseState=SimpleNamespace(enabled=False, available=True))
 
     self.assertFalse(car_state._update_ap_hybrid(ret, 3, 40.0, status_counter=1))
-    self.assertFalse(car_state._ap_hybrid_exit_recovery_active)
-    self.assertFalse(car_state._ap_hybrid_lkas_suppressed(3))
-    self.assertEqual(TeslaFlagsSP(0), car_state._longitudinal_source_flags())
+    self.assertTrue(car_state._ap_hybrid_exit_recovery_active)
+    self.assertTrue(car_state._ap_hybrid_lkas_suppressed(3))
+    self.assertEqual(TeslaFlagsSP.AP_HYBRID_EXIT_RECOVERY_ACTIVE, car_state._longitudinal_source_flags())
+
+    car_state.das_steering_control["DAS_steeringControlType"] = 1
+    for counter in range(2, 8):
+      self.assertFalse(car_state._update_ap_hybrid(ret, 2, 40.0, status_counter=counter))
+      self.assertTrue(car_state._ap_hybrid_lkas_suppressed(2))
+
+    car_state.das_steering_control["DAS_steeringControlType"] = 0
+    for counter in range(8, 12):
+      self.assertFalse(car_state._update_ap_hybrid(ret, 2, 40.0, status_counter=counter))
+      self.assertTrue(car_state._ap_hybrid_lkas_suppressed(2))
+    self.assertFalse(car_state._update_ap_hybrid(ret, 2, 40.0, status_counter=12))
+    self.assertFalse(car_state._ap_hybrid_lkas_suppressed(2))
+
+  def test_ap_hybrid_normal_brake_exit_starts_recovery_after_aborted_state(self):
+    car_state = self._override_state(TeslaLongitudinalSource.apHybridStock)
+    car_state._ap_hybrid_enabled = True
+    car_state.tesla_ap_hybrid_active = True
+    car_state.tesla_stock_lateral_active = True
+    car_state.das_steering_control["DAS_steeringControlType"] = 1
+    ret = SimpleNamespace(brakePressed=True, gasPressed=False, accFaulted=False, steeringTorque=0.0,
+                          leftBlinker=False, rightBlinker=False,
+                          aEgo=-0.5, cruiseState=SimpleNamespace(enabled=False, available=True))
+
+    self.assertTrue(car_state._update_ap_hybrid(ret, 8, 50.0, status_counter=1))
+    self.assertTrue(car_state._update_ap_hybrid(ret, 9, 50.0, status_counter=2))
+    self.assertTrue(car_state._update_ap_hybrid(ret, 2, 50.0, status_counter=3))
+    self.assertTrue(car_state._update_ap_hybrid(ret, 2, 50.0, status_counter=4))
+    self.assertFalse(car_state._update_ap_hybrid(ret, 2, 50.0, status_counter=5))
+    self.assertTrue(car_state._ap_hybrid_exit_recovery_active)
+    self.assertTrue(car_state._ap_hybrid_lkas_suppressed(2))
 
   def test_ap_hybrid_lane_change_available_state_keeps_session_and_longitudinal_source(self):
     car_state = self._override_state(TeslaLongitudinalSource.apHybridStock)
@@ -625,6 +680,11 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
     self.assertTrue(car_state._update_ap_hybrid(ret, 2, 80.0))
     self.assertFalse(car_state._update_ap_hybrid(ret, 2, 80.0))
     self.assertEqual(TeslaLongitudinalSource.sp, car_state.tesla_longitudinal_source)
+    self.assertTrue(car_state._ap_hybrid_lkas_suppressed())
+    for _ in range(AP_HYBRID_EXIT_RECOVERY_CONFIRM_SAMPLES - 1):
+      self.assertFalse(car_state._update_ap_hybrid(ret, 2, 80.0))
+      self.assertTrue(car_state._ap_hybrid_lkas_suppressed())
+    self.assertFalse(car_state._update_ap_hybrid(ret, 2, 80.0))
     self.assertFalse(car_state._ap_hybrid_lkas_suppressed())
     self.assertFalse(car_state._ap_hybrid_lkas_suppressed(14))
 
