@@ -543,6 +543,21 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
     self.assertFalse(car_state._update_ap_hybrid(ret, 2, 40.0, status_counter=2))
     self.assertFalse(car_state._ap_hybrid_lkas_suppressed(2))
 
+  def test_dynamic_ap_sp_only_brake_exit_does_not_start_oem_recovery(self):
+    car_state = self._override_state(TeslaLongitudinalSource.sp)
+    car_state._ap_hybrid_enabled = True
+    car_state._ap_dynamic_long_enabled = True
+    car_state.tesla_ap_hybrid_active = True
+    car_state.tesla_stock_lateral_active = False
+    ret = SimpleNamespace(brakePressed=True, gasPressed=False, accFaulted=False, steeringTorque=0.0,
+                          leftBlinker=False, rightBlinker=False,
+                          aEgo=-0.5, cruiseState=SimpleNamespace(enabled=False, available=True))
+
+    self.assertFalse(car_state._update_ap_hybrid(ret, 3, 40.0, status_counter=1))
+    self.assertFalse(car_state._ap_hybrid_exit_recovery_active)
+    self.assertFalse(car_state._ap_hybrid_lkas_suppressed(3))
+    self.assertEqual(TeslaFlagsSP(0), car_state._longitudinal_source_flags())
+
   def test_ap_hybrid_lane_change_available_state_keeps_session_and_longitudinal_source(self):
     car_state = self._override_state(TeslaLongitudinalSource.apHybridStock)
     car_state._ap_hybrid_enabled = True

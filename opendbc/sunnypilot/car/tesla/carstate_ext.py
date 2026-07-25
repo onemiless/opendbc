@@ -362,6 +362,8 @@ class CarStateExt:
       self._ap_hybrid_exit_samples = 0
 
     if self.tesla_ap_hybrid_active:
+      oem_control_active = (self._get_longitudinal_source() == TeslaLongitudinalSource.apHybridStock or
+                            self.tesla_stock_lateral_active)
       restore_source = self._ap_hybrid_restore_source
       self.tesla_ap_hybrid_active = False
       self.tesla_stock_lateral_active = False
@@ -376,11 +378,13 @@ class CarStateExt:
       self._dyn_exit_frames = 0
       self._dyn_cooldown_frames = 200
       self._dyn_debug_followup_frames = 200
-      self._ap_hybrid_exit_recovery_active = (autopilot_state not in (0, 1, 2) and
+      self._ap_hybrid_exit_recovery_active = (oem_control_active and
+                                              autopilot_state not in (0, 1, 2) and
                                               autopilot_state not in TESLA_AP_FAULT_STATES)
       self._ap_hybrid_exit_recovery_samples = 0
       self._log_dynamic_state("ap_hybrid_exit", ret, speed_kph,
                               restore_source=str(restore_source), autopilot_state=int(autopilot_state),
+                              oem_control_active=oem_control_active,
                               exit_recovery_active=self._ap_hybrid_exit_recovery_active)
     return False
 
