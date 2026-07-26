@@ -89,6 +89,9 @@ FSD_14_FW = {
   ],
   CAR.TESLA_MODEL_Y: [
     b'TeMYG4_Legacy3Y_0.0.0 (6),Y4003.04.0',
+    # Observed using steering control type 1 while stock AP is active, which is
+    # the FSD 14 control-type mapping despite its 03.x software version.
+    b'TeMYG4_Main_0.0.0 (67),Y4C003.03.1',
     b'TeMYG4_Main_0.0.0 (77),Y4003.05.4',
     b'TeMYG4_Main_0.0.0 (78),Y4003.06.0',
   ]

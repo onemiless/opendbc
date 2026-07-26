@@ -14,7 +14,7 @@ from opendbc.car.tesla.interface import CarInterface
 from opendbc.car.tesla.fingerprints import FW_VERSIONS
 from opendbc.car.tesla.radar_interface import RADAR_START_ADDR
 from opendbc.car.tesla.teslacan import TeslaCAN
-from opendbc.car.tesla.values import CANBUS, CAR, FSD_14_FW
+from opendbc.car.tesla.values import CANBUS, CAR, FSD_14_FW, TeslaFlags, TeslaSafetyFlags
 from opendbc.sunnypilot.car.tesla.carstate_ext import AP_HYBRID_EXIT_RECOVERY_CONFIRM_SAMPLES, CarStateExt, TeslaLongitudinalSource
 from opendbc.sunnypilot.car.tesla import dynamic_acc_debug
 from opendbc.sunnypilot.car.interfaces import _initialize_tesla_ap_hybrid, _initialize_tesla_dynamic_auto_stock
@@ -71,6 +71,8 @@ FSD_14_FW_RULE = {
 
 
 class TestTeslaFingerprint(unittest.TestCase):
+  OBSERVED_MODEL_Y_FSD_14_EPS_FW = b'TeMYG4_Main_0.0.0 (67),Y4C003.03.1'
+
   def test_fw_platform_code(self):
     # Every EPS FW must parse and its platform letter must match the car it's filed under.
     for car_model, ecus in FW_VERSIONS.items():
@@ -94,9 +96,25 @@ class TestTeslaFingerprint(unittest.TestCase):
         expected = (
           m['variant_code'].startswith(variant_prefix)
           and m['variant_code'].endswith(variant_suffix)
-          and int(m['software_major']) >= 4
+          and (
+            int(m['software_major']) >= 4
+            # Vehicle logs confirm Y4C003.03.1 already uses the FSD 14
+            # steering-control type mapping. Keep this exception variant-specific.
+            or (m['variant_code'] == b'4C003' and int(m['software_major']) >= 3)
+          )
         )
         assert is_fsd_14 == expected, f"{fw}"
+
+  def test_observed_model_y_fsd_14_firmware_sets_runtime_and_safety_flags(self):
+    fw = self.OBSERVED_MODEL_Y_FSD_14_EPS_FW
+    car_fw = [CarParams.CarFw.new_message(ecu=Ecu.eps, address=0x730, fwVersion=fw)]
+
+    self.assertIn(fw, FW_VERSIONS[CAR.TESLA_MODEL_Y][(Ecu.eps, 0x730, None)])
+    self.assertIn(fw, FSD_14_FW[CAR.TESLA_MODEL_Y])
+
+    cp = CarInterface.get_params(CAR.TESLA_MODEL_Y, gen_empty_fingerprint(), car_fw, False, False, False)
+    self.assertTrue(cp.flags & TeslaFlags.FSD_14)
+    self.assertTrue(cp.safetyConfigs[0].safetyParam & TeslaSafetyFlags.FSD_14)
 
   def test_radar_detection(self):
     # Test radar availability detection for cars with radar DBC defined
