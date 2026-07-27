@@ -71,7 +71,7 @@ FSD_14_FW_RULE = {
 
 
 class TestTeslaFingerprint(unittest.TestCase):
-  OBSERVED_MODEL_Y_FSD_14_EPS_FW = b'TeMYG4_Main_0.0.0 (67),Y4C003.03.1'
+  OBSERVED_MODEL_Y_PRE_FSD_14_EPS_FW = b'TeMYG4_Main_0.0.0 (67),Y4C003.03.1'
 
   def test_fw_platform_code(self):
     # Every EPS FW must parse and its platform letter must match the car it's filed under.
@@ -96,25 +96,24 @@ class TestTeslaFingerprint(unittest.TestCase):
         expected = (
           m['variant_code'].startswith(variant_prefix)
           and m['variant_code'].endswith(variant_suffix)
-          and (
-            int(m['software_major']) >= 4
-            # Vehicle logs confirm Y4C003.03.1 already uses the FSD 14
-            # steering-control type mapping. Keep this exception variant-specific.
-            or (m['variant_code'] == b'4C003' and int(m['software_major']) >= 3)
-          )
+          and int(m['software_major']) >= 4
         )
         assert is_fsd_14 == expected, f"{fw}"
 
-  def test_observed_model_y_fsd_14_firmware_sets_runtime_and_safety_flags(self):
-    fw = self.OBSERVED_MODEL_Y_FSD_14_EPS_FW
+  def test_observed_model_y_03_firmware_keeps_pre_fsd_14_steering_semantics(self):
+    fw = self.OBSERVED_MODEL_Y_PRE_FSD_14_EPS_FW
     car_fw = [CarParams.CarFw.new_message(ecu=Ecu.eps, address=0x730, fwVersion=fw)]
 
     self.assertIn(fw, FW_VERSIONS[CAR.TESLA_MODEL_Y][(Ecu.eps, 0x730, None)])
-    self.assertIn(fw, FSD_14_FW[CAR.TESLA_MODEL_Y])
+    self.assertNotIn(fw, FSD_14_FW[CAR.TESLA_MODEL_Y])
 
     cp = CarInterface.get_params(CAR.TESLA_MODEL_Y, gen_empty_fingerprint(), car_fw, False, False, False)
-    self.assertTrue(cp.flags & TeslaFlags.FSD_14)
-    self.assertTrue(cp.safetyConfigs[0].safetyParam & TeslaSafetyFlags.FSD_14)
+    self.assertFalse(cp.flags & TeslaFlags.FSD_14)
+    self.assertFalse(cp.safetyConfigs[0].safetyParam & TeslaSafetyFlags.FSD_14)
+
+    tesla_can = TeslaCAN(cp, CANPacker("tesla_model3_party"))
+    _, steering_control, _ = tesla_can.create_steering_control(0.0, True)
+    self.assertEqual(1, steering_control[2] >> 6)
 
   def test_radar_detection(self):
     # Test radar availability detection for cars with radar DBC defined
