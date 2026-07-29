@@ -12,6 +12,9 @@
   {.msg = {{0x286, 0, 8, 10U, .max_counter = 15U, .ignore_quality_flag = true}, { 0 }, { 0 }}},   /* DI_state (acc state) */                         \
   {.msg = {{0x311, 0, 7, 10U, .max_counter = 15U, .ignore_quality_flag = true}, { 0 }, { 0 }}},   /* UI_warning (blinkers, buckle switch & doors) */ \
 
+#define TESLA_TURN_SIGNAL_VALIDATION_RX_CHECK \
+  {.msg = {{0x118, 0, 8, 10U, .max_counter = 15U, .ignore_quality_flag = true}, { 0 }, { 0 }}},   /* DI_systemStatus (validated P gear) */ \
+
 #define TESLA_VEHICLE_BUS_ADDR_CHECK \
   {.msg = {{0x3DF, 1, 8, 2U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true, .ignore_frequency_check = true}, { 0 }, { 0 }}},    /* UI_status2 */ \
 
@@ -51,6 +54,8 @@ static bool tesla_ap_hybrid_lateral_handoff = false;
 static bool tesla_ap_stock_lateral_active = false;
 static bool tesla_speed_limit_cruise_buttons = false;
 static bool tesla_turn_signal_validation = false;
+static bool tesla_vehicle_in_park = false;
+static uint32_t tesla_gear_timestamp = 0U;
 static uint8_t tesla_turn_signal_active_frames = 0U;
 static uint8_t tesla_turn_signal_active_state = 0U;
 
@@ -77,8 +82,9 @@ static uint8_t tesla_get_counter(const CANPacket_t *msg) {
   } else if (msg->addr == 0x488U) {
     // Signal: DAS_steeringControlCounter
     cnt = msg->data[2] & 0x0FU;
-  } else if ((msg->addr == 0x257U) || (msg->addr == 0x145U) || (msg->addr == 0x286U) || (msg->addr == 0x311U)) {
-    // Signal: DI_speedCounter, ESP_statusCounter, DI_locStatusCounter, UI_warningCounter
+  } else if ((msg->addr == 0x118U) || (msg->addr == 0x257U) || (msg->addr == 0x145U) ||
+             (msg->addr == 0x286U) || (msg->addr == 0x311U)) {
+    // Signal: DI_systemStatusCounter, DI_speedCounter, ESP_statusCounter, DI_locStatusCounter, UI_warningCounter
     cnt = msg->data[1] & 0x0FU;
   } else if (msg->addr == 0x155U) {
     // Signal: ESP_wheelRotationCounter
@@ -102,8 +108,8 @@ static int _tesla_get_checksum_byte(const int addr) {
   } else if (addr == 0x238) {
     // Signal: CRC_STW_ACTN_RQ
     checksum_byte = 7;
-  } else if ((addr == 0x257) || (addr == 0x145) || (addr == 0x286) || (addr == 0x311)) {
-    // Signal: DI_speedChecksum, ESP_statusChecksum, DI_locStatusChecksum, UI_warningChecksum
+  } else if ((addr == 0x118) || (addr == 0x257) || (addr == 0x145) || (addr == 0x286) || (addr == 0x311)) {
+    // Signal: DI_systemStatusChecksum, DI_speedChecksum, ESP_statusChecksum, DI_locStatusChecksum, UI_warningChecksum
     checksum_byte = 0;
   } else {
   }
@@ -190,6 +196,13 @@ static void tesla_rx_hook(const CANPacket_t *msg) {
 
       // Signal: DI_accelPedalPressed
       gas_pressed = GET_BIT(msg, 34U);
+    }
+
+    // DI_gear: 1 = Park. This message is checksum/counter validated only when
+    // stationary turn-signal validation is configured.
+    if (msg->addr == 0x118U) {
+      tesla_vehicle_in_park = ((msg->data[2] >> 5) & 0x07U) == 1U;
+      tesla_gear_timestamp = microsecond_timer_get();
     }
 
     // 2nd vehicle speed (ESP_B)
@@ -417,8 +430,9 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
                                        (tesla_turn_signal_active_state == turn_state);
     const bool pulse_length_valid = !active_turn || (tesla_turn_signal_active_frames < 5U);
     const bool crc_valid = msg->data[0] == tesla_sccm_left_stalk_crc(msg);
-    const bool valid = tesla_turn_signal_validation && !controls_allowed && !controls_allowed_lateral &&
-                       brake_pressed && !vehicle_moving &&
+    const bool gear_fresh = safety_get_ts_elapsed(microsecond_timer_get(), tesla_gear_timestamp) < 500000U;
+    const bool valid = tesla_turn_signal_validation && tesla_vehicle_in_park && gear_fresh &&
+                       !controls_allowed && !controls_allowed_lateral && !vehicle_moving &&
                        allowed_turn_state && other_fields_clear && pulse_direction_valid && pulse_length_valid && crc_valid;
     if (!valid) {
       violation = true;
@@ -562,6 +576,8 @@ static safety_config tesla_init(uint16_t param) {
   tesla_ap_stock_lateral_active = false;
   tesla_turn_signal_active_frames = 0U;
   tesla_turn_signal_active_state = 0U;
+  tesla_vehicle_in_park = false;
+  tesla_gear_timestamp = 0U;
   // we need to assume Autopark/Summon on startup since DI_state is a low freq msg.
   // this is so that we don't fault if starting while these systems are active
   tesla_summon = true;
@@ -576,6 +592,17 @@ static safety_config tesla_init(uint16_t param) {
     TESLA_VEHICLE_BUS_ADDR_CHECK
   };
 
+  static RxCheck tesla_model3_y_turn_signal_validation_rx_checks[] = {
+    TESLA_COMMON_RX_CHECKS
+    TESLA_TURN_SIGNAL_VALIDATION_RX_CHECK
+  };
+
+  static RxCheck tesla_model3_y_vehicle_bus_turn_signal_validation_rx_checks[] = {
+    TESLA_COMMON_RX_CHECKS
+    TESLA_VEHICLE_BUS_ADDR_CHECK
+    TESLA_TURN_SIGNAL_VALIDATION_RX_CHECK
+  };
+
   safety_config ret;
   if (tesla_longitudinal) {
     SET_TX_MSGS(TESLA_M3_Y_LONG_TX_MSGS, ret);
@@ -583,7 +610,11 @@ static safety_config tesla_init(uint16_t param) {
     SET_TX_MSGS(TESLA_M3_Y_TX_MSGS, ret);
   }
 
-  if (tesla_has_vehicle_bus) {
+  if (tesla_has_vehicle_bus && tesla_turn_signal_validation) {
+    SET_RX_CHECKS(tesla_model3_y_vehicle_bus_turn_signal_validation_rx_checks, ret);
+  } else if (tesla_turn_signal_validation) {
+    SET_RX_CHECKS(tesla_model3_y_turn_signal_validation_rx_checks, ret);
+  } else if (tesla_has_vehicle_bus) {
     SET_RX_CHECKS(tesla_model3_y_vehicle_bus_rx_checks, ret);
   } else {
     SET_RX_CHECKS(tesla_model3_y_rx_checks, ret);

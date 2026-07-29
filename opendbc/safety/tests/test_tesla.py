@@ -121,6 +121,12 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
               "ESP_wheelSpeedsQF": quality_flag}
     return self.packer.make_can_msg_safety("ESP_B", 0, values)
 
+  def _gear_msg(self, gear: int, counter=0):
+    return self.packer.make_can_msg_safety("DI_systemStatus", 0, {
+      "DI_gear": gear,
+      "DI_systemStatusCounter": counter,
+    })
+
   def _user_gas_msg(self, gas):
     values = {"DI_accelPedalPressed": gas > 0}
     return self.packer.make_can_msg_safety("DI_speed", 0, values)
@@ -168,7 +174,7 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
     self.safety.set_safety_hooks(CarParams.SafetyModel.tesla, self.SAFETY_PARAM)
     self.safety.init_tests()
     self._rx(self._vehicle_moving_msg(0))
-    self._rx(self._user_brake_msg(True))
+    self._rx(self._gear_msg(1))  # DI_GEAR_P
 
   def test_turn_signal_validation_requires_flag(self):
     self.assertFalse(self._tx(self._sccm_left_stalk_msg(2, 0)))
@@ -202,10 +208,23 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
     self.safety.set_controls_allowed_lateral(True)
     self.assertFalse(self._tx(self._sccm_left_stalk_msg(2, 2)))
 
-  def test_turn_signal_validation_requires_brake(self):
+  def test_turn_signal_validation_requires_park(self):
     self._enable_turn_signal_validation()
     self._rx(self._user_brake_msg(False))
-    self.assertFalse(self._tx(self._sccm_left_stalk_msg(2, 0)))
+    self.assertTrue(self._tx(self._sccm_left_stalk_msg(2, 0)))
+    self.assertTrue(self._tx(self._sccm_left_stalk_msg(0, 1)))
+
+    for counter, gear in enumerate((0, 2, 3, 4), start=2):  # invalid, R, N, D
+      self._rx(self._gear_msg(gear, counter))
+      with self.subTest(gear=gear):
+        self.assertFalse(self._tx(self._sccm_left_stalk_msg(2, counter)))
+
+  def test_turn_signal_validation_requires_fresh_park_state(self):
+    self._enable_turn_signal_validation()
+    self.safety.set_timer(499_999)
+    self.assertTrue(self._tx(self._sccm_left_stalk_msg(2, 0)))
+    self.safety.set_timer(500_000)
+    self.assertFalse(self._tx(self._sccm_left_stalk_msg(2, 1)))
 
   def test_turn_signal_validation_limits_active_pulse(self):
     self._enable_turn_signal_validation()
