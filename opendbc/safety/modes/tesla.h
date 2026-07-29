@@ -50,6 +50,23 @@ static bool tesla_ap_hybrid_handoff = false;
 static bool tesla_ap_hybrid_lateral_handoff = false;
 static bool tesla_ap_stock_lateral_active = false;
 static bool tesla_speed_limit_cruise_buttons = false;
+static bool tesla_turn_signal_validation = false;
+static uint8_t tesla_turn_signal_active_frames = 0U;
+static uint8_t tesla_turn_signal_active_state = 0U;
+
+static uint8_t tesla_sccm_left_stalk_crc(const CANPacket_t *msg) {
+  const uint8_t magic_bytes[16] = {0x9BU, 0xE8U, 0x2AU, 0xD3U, 0xD3U, 0x83U, 0x4CU, 0x5EU,
+                                   0x3FU, 0x5EU, 0xE2U, 0x28U, 0x3AU, 0x13U, 0xAFU, 0xCEU};
+  const uint8_t payload[4] = {(uint8_t)(msg->data[1] & 0xF0U), msg->data[2], msg->data[3], 0U};
+  uint8_t crc = 0U;
+  for (uint8_t i = 0U; i < 4U; i++) {
+    crc ^= payload[i];
+    for (uint8_t bit = 0U; bit < 8U; bit++) {
+      crc = (crc & 0x80U) != 0U ? (uint8_t)((crc << 1) ^ 0x2FU) : (uint8_t)(crc << 1);
+    }
+  }
+  return crc ^ magic_bytes[msg->data[1] & 0x0FU];
+}
 
 static uint8_t tesla_get_counter(const CANPacket_t *msg) {
 
@@ -389,6 +406,31 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
     }
   }
 
+  // SCCM_leftStalk validation pulse: stationary, disengaged, short, and restricted to left/right/idle.
+  if (msg->addr == 0x249U) {
+    const uint8_t turn_state = msg->data[2] & 0x0FU;
+    const bool active_turn = (turn_state == 2U) || (turn_state == 6U);
+    const bool allowed_turn_state = (turn_state == 0U) || active_turn;
+    const bool other_fields_clear = ((msg->data[1] & 0xF0U) == 0U) &&
+                                    ((msg->data[2] & 0xF0U) == 0U) && (msg->data[3] == 0U);
+    const bool pulse_direction_valid = !active_turn || (tesla_turn_signal_active_state == 0U) ||
+                                       (tesla_turn_signal_active_state == turn_state);
+    const bool pulse_length_valid = !active_turn || (tesla_turn_signal_active_frames < 5U);
+    const bool crc_valid = msg->data[0] == tesla_sccm_left_stalk_crc(msg);
+    const bool valid = tesla_turn_signal_validation && !controls_allowed && !controls_allowed_lateral &&
+                       brake_pressed && !vehicle_moving &&
+                       allowed_turn_state && other_fields_clear && pulse_direction_valid && pulse_length_valid && crc_valid;
+    if (!valid) {
+      violation = true;
+    } else if (active_turn) {
+      tesla_turn_signal_active_frames++;
+      tesla_turn_signal_active_state = turn_state;
+    } else {
+      tesla_turn_signal_active_frames = 0U;
+      tesla_turn_signal_active_state = 0U;
+    }
+  }
+
   // Extra TX messages: basic safety checks
   if (msg->addr == 0x370U) {
     // Nag killer echo: verify checksum
@@ -461,7 +503,7 @@ static safety_config tesla_init(uint16_t param) {
     {0x3FD, 0, 8, .check_relay = false, .disable_static_blocking = true},  // UI_autopilotControl (FSD unlock)
     {0x370, 0, 8, .check_relay = false, .disable_static_blocking = true},  // EPAS3S_sysStatus (nag killer)
     {0x399, 0, 8, .check_relay = false, .disable_static_blocking = true},  // ISA speed chime suppress
-    {0x249, 0, 3, .check_relay = false, .disable_static_blocking = true},  // SCCM_leftStalk (turn signal)
+    {0x249, 1, 4, .check_relay = false, .disable_static_blocking = true},  // SCCM_leftStalk (validation only)
     {0x238, 1, 8, .check_relay = false, .disable_static_blocking = true},  // STW_ACTN_RQ (speed control)
   };
 
@@ -473,7 +515,7 @@ static safety_config tesla_init(uint16_t param) {
     {0x3FD, 0, 8, .check_relay = false, .disable_static_blocking = true}, // UI_autopilotControl (FSD unlock)
     {0x370, 0, 8, .check_relay = false, .disable_static_blocking = true}, // EPAS3S_sysStatus (nag killer)
     {0x399, 0, 8, .check_relay = false, .disable_static_blocking = true}, // ISA speed chime suppress
-    {0x249, 0, 3, .check_relay = false, .disable_static_blocking = true}, // SCCM_leftStalk (turn signal)
+    {0x249, 1, 4, .check_relay = false, .disable_static_blocking = true}, // SCCM_leftStalk (validation only)
     {0x238, 1, 8, .check_relay = false, .disable_static_blocking = true}, // STW_ACTN_RQ (speed control)
   };
 
@@ -493,6 +535,7 @@ static safety_config tesla_init(uint16_t param) {
   const uint16_t TESLA_PARAM_SP_SPEED_LIMIT_CRUISE_BUTTONS = 32;
   const uint16_t TESLA_PARAM_SP_AP_HYBRID_HANDOFF = 64;
   const uint16_t TESLA_PARAM_SP_AP_HYBRID_LATERAL_HANDOFF = 128;
+  const uint16_t TESLA_PARAM_SP_TURN_SIGNAL_VALIDATION = 256;
 
   tesla_has_vehicle_bus = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_VEHICLE_BUS);
 
@@ -510,12 +553,15 @@ static safety_config tesla_init(uint16_t param) {
   tesla_speed_limit_cruise_buttons = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_SPEED_LIMIT_CRUISE_BUTTONS);
   tesla_ap_hybrid_handoff = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_AP_HYBRID_HANDOFF);
   tesla_ap_hybrid_lateral_handoff = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_AP_HYBRID_LATERAL_HANDOFF);
+  tesla_turn_signal_validation = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_TURN_SIGNAL_VALIDATION);
 
   tesla_stock_aeb = false;
   tesla_stock_steering_control = false;
   tesla_stock_steering_control_prev = false;
   tesla_stock_longitudinal_active = false;
   tesla_ap_stock_lateral_active = false;
+  tesla_turn_signal_active_frames = 0U;
+  tesla_turn_signal_active_state = 0U;
   // we need to assume Autopark/Summon on startup since DI_state is a low freq msg.
   // this is so that we don't fault if starting while these systems are active
   tesla_summon = true;

@@ -23,6 +23,7 @@ class TeslaFlagsSP(IntFlag):
   DYNAMIC_AP_LONGITUDINAL = 4096  # Config: switch AP longitudinal between SP and OEM using speed hysteresis
   AP_HYBRID_STOCK_LATERAL_ACTIVE = 8192  # Runtime: Tesla AP owns lateral control
   AP_HYBRID_EXIT_RECOVERY_ACTIVE = 16384  # Runtime: preserve MADS while Tesla AP/LKAS settles after exit
+  TURN_SIGNAL_VALIDATION = 32768  # Config: stationary one-shot SCCM left-stalk validation
 
 
 class MadsScreenButtonType:
@@ -41,3 +42,4 @@ class TeslaSafetyFlagsSP:
   SPEED_LIMIT_CRUISE_BUTTONS = 32
   AP_HYBRID_HANDOFF = 64
   AP_HYBRID_LATERAL_HANDOFF = 128
+  TURN_SIGNAL_VALIDATION = 256

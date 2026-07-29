@@ -1,6 +1,39 @@
 from opendbc.car import DT_CTRL
+from opendbc.car.can_definitions import CanData
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.tesla.values import CANBUS, CarControllerParams, TeslaFlags
+
+
+SCCM_LEFT_STALK_MAGIC_BYTES = (0x9B, 0xE8, 0x2A, 0xD3, 0xD3, 0x83, 0x4C, 0x5E,
+                               0x3F, 0x5E, 0xE2, 0x28, 0x3A, 0x13, 0xAF, 0xCE)
+SCCM_LEFT_STALK_ADDRESS = 0x249
+SCCM_TURN_IDLE = 0
+SCCM_TURN_RIGHT = 2
+SCCM_TURN_LEFT = 6
+
+
+def _crc8_opensafety(data: bytes) -> int:
+  crc = 0
+  for value in data:
+    crc ^= value
+    for _ in range(8):
+      crc = ((crc << 1) ^ 0x2F) & 0xFF if crc & 0x80 else (crc << 1) & 0xFF
+  return crc
+
+
+def create_sccm_left_stalk(turn_state: int, counter: int) -> CanData:
+  """Build the observed 4-byte Model 3/Y left-stalk frame for a validation pulse."""
+  if turn_state not in (SCCM_TURN_IDLE, SCCM_TURN_RIGHT, SCCM_TURN_LEFT):
+    raise ValueError(f"unvalidated SCCM turn state: {turn_state}")
+  if not 0 <= counter <= 15:
+    raise ValueError(f"invalid SCCM counter: {counter}")
+
+  data = bytearray(4)
+  data[1] = counter
+  data[2] = turn_state
+  crc_payload = bytes((data[1] & 0xF0, data[2], data[3], 0))
+  data[0] = _crc8_opensafety(crc_payload) ^ SCCM_LEFT_STALK_MAGIC_BYTES[counter]
+  return CanData(SCCM_LEFT_STALK_ADDRESS, bytes(data), CANBUS.vehicle)
 
 
 def get_steer_ctrl_type(flags: int, ctrl_type: int) -> int:

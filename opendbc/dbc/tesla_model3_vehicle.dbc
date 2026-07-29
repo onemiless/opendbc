@@ -82,12 +82,12 @@ BO_ 259 VCRIGHT_doorStatus: 8 VEH
  SG_ VCRIGHT_rearHandlePWM : 21|7@1+ (1,0) [0|100] "%" X
  SG_ VCRIGHT_rearIntSwitchPressed : 32|1@1+ (1,0) [0|1] "" aps
 
-BO_ 585 SCCM_leftStalk: 3 VEH
+BO_ 585 SCCM_leftStalk: 4 VEH
  SG_ SCCM_leftStalkCounter : 8|4@1+ (1,0) [0|15] "" X
  SG_ SCCM_washWipeButtonStatus : 14|2@1+ (1,0) [0|3] "" das
- SG_ SCCM_turnIndicatorStalkStatus : 16|3@1+ (1,0) [0|5] "" das
+ SG_ SCCM_turnIndicatorStalkStatus : 16|4@1+ (1,0) [0|9] "" das
  SG_ SCCM_leftStalkCrc : 0|8@1+ (1,0) [0|255] "" X
- SG_ SCCM_leftStalkReserved1 : 19|5@1+ (1,0) [0|31] "" X
+ SG_ SCCM_leftStalkReserved1 : 24|5@1+ (1,0) [0|31] "" X
  SG_ SCCM_highBeamStalkStatus : 12|2@1+ (1,0) [0|3] "" das
 
 BO_ 280 DI_systemStatus: 8 VEH

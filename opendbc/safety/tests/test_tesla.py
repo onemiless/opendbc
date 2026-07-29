@@ -4,7 +4,7 @@ import unittest
 import numpy as np
 
 from opendbc.car.lateral import get_max_angle_delta_vm, get_max_angle_vm
-from opendbc.car.tesla.teslacan import get_steer_ctrl_type
+from opendbc.car.tesla.teslacan import create_sccm_left_stalk, get_steer_ctrl_type
 from opendbc.car.tesla.values import CANBUS, CarControllerParams, STEER_DISENGAGE_THRESHOLD, TeslaSafetyFlags, TeslaFlags
 from opendbc.car.tesla.carcontroller import get_safety_CP
 from opendbc.car.structs import CarParams
@@ -20,6 +20,7 @@ MSG_DAS_steeringControl = 0x488
 MSG_APS_eacMonitor = 0x27d
 MSG_DAS_Control = 0x2b9
 MSG_STW_ACTN_RQ = 0x238
+MSG_SCCM_LEFT_STALK = 0x249
 
 
 def round_angle(apply_angle, can_offset=0):
@@ -34,7 +35,8 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
 
   RELAY_MALFUNCTION_ADDRS = {0: (MSG_DAS_steeringControl, MSG_APS_eacMonitor)}
   FWD_BLACKLISTED_ADDRS = {2: [MSG_DAS_steeringControl, MSG_APS_eacMonitor]}
-  TX_MSGS = [[MSG_DAS_steeringControl, 0], [MSG_APS_eacMonitor, 0], [MSG_DAS_Control, 0], [MSG_STW_ACTN_RQ, CANBUS.vehicle]]
+  TX_MSGS = [[MSG_DAS_steeringControl, 0], [MSG_APS_eacMonitor, 0], [MSG_DAS_Control, 0],
+             [MSG_STW_ACTN_RQ, CANBUS.vehicle], [MSG_SCCM_LEFT_STALK, CANBUS.vehicle]]
 
   STANDSTILL_THRESHOLD = 0.1
   GAS_PRESSED_THRESHOLD = 3
@@ -154,6 +156,64 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
     if values is not None:
       msg_values.update(values)
     return self.packer_adas.make_can_msg_safety("STW_ACTN_RQ", bus, msg_values)
+
+  @staticmethod
+  def _sccm_left_stalk_msg(turn_state=0, counter=0):
+    msg = create_sccm_left_stalk(turn_state, counter)
+    return libsafety_py.make_CANPacket(msg.address, msg.src, msg.dat)
+
+  def _enable_turn_signal_validation(self):
+    self.addCleanup(self.safety.set_current_safety_param_sp, 0)
+    self.safety.set_current_safety_param_sp(TeslaSafetyFlagsSP.TURN_SIGNAL_VALIDATION)
+    self.safety.set_safety_hooks(CarParams.SafetyModel.tesla, self.SAFETY_PARAM)
+    self.safety.init_tests()
+    self._rx(self._vehicle_moving_msg(0))
+    self._rx(self._user_brake_msg(True))
+
+  def test_turn_signal_validation_requires_flag(self):
+    self.assertFalse(self._tx(self._sccm_left_stalk_msg(2, 0)))
+
+  def test_turn_signal_validation_frames(self):
+    self._enable_turn_signal_validation()
+    for counter, turn_state in ((0, 0), (1, 2), (2, 0), (3, 6), (4, 0)):
+      with self.subTest(counter=counter, turn_state=turn_state):
+        self.assertTrue(self._tx(self._sccm_left_stalk_msg(turn_state, counter)))
+
+    for turn_state in (1, 3, 4, 5, 7, 8, 9):
+      msg = self._sccm_left_stalk_msg(0, 5)
+      msg.data[2] = turn_state
+      with self.subTest(turn_state=turn_state):
+        self.assertFalse(self._tx(msg))
+
+    bad_crc = self._sccm_left_stalk_msg(2, 6)
+    bad_crc.data[0] ^= 0xFF
+    self.assertFalse(self._tx(bad_crc))
+
+  def test_turn_signal_validation_requires_stationary_disengaged_vehicle(self):
+    self._enable_turn_signal_validation()
+    self._rx(self._vehicle_moving_msg(5))
+    self.assertFalse(self._tx(self._sccm_left_stalk_msg(2, 0)))
+
+    self._rx(self._vehicle_moving_msg(0))
+    self.safety.set_controls_allowed(True)
+    self.assertFalse(self._tx(self._sccm_left_stalk_msg(2, 1)))
+
+    self.safety.set_controls_allowed(False)
+    self.safety.set_controls_allowed_lateral(True)
+    self.assertFalse(self._tx(self._sccm_left_stalk_msg(2, 2)))
+
+  def test_turn_signal_validation_requires_brake(self):
+    self._enable_turn_signal_validation()
+    self._rx(self._user_brake_msg(False))
+    self.assertFalse(self._tx(self._sccm_left_stalk_msg(2, 0)))
+
+  def test_turn_signal_validation_limits_active_pulse(self):
+    self._enable_turn_signal_validation()
+    for counter in range(5):
+      self.assertTrue(self._tx(self._sccm_left_stalk_msg(2, counter)))
+    self.assertFalse(self._tx(self._sccm_left_stalk_msg(2, 5)))
+    self.assertTrue(self._tx(self._sccm_left_stalk_msg(0, 6)))
+    self.assertTrue(self._tx(self._sccm_left_stalk_msg(6, 7)))
 
   def test_stw_action_request_requires_speed_limit_cruise_button_flag(self):
     for speed_control_state in (0, 16, 32):
