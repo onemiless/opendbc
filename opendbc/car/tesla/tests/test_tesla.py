@@ -18,6 +18,7 @@ from opendbc.car.tesla.values import CANBUS, CAR, FSD_14_FW, TeslaFlags, TeslaSa
 from opendbc.sunnypilot.car.tesla.carstate_ext import AP_HYBRID_EXIT_RECOVERY_CONFIRM_SAMPLES, CarStateExt, TeslaLongitudinalSource
 from opendbc.sunnypilot.car.tesla import dynamic_acc_debug
 from opendbc.sunnypilot.car.interfaces import (_initialize_tesla_ap_hybrid, _initialize_tesla_dynamic_auto_stock,
+                                               _initialize_tesla_speed_button_validation,
                                                _initialize_tesla_turn_signal_validation)
 from opendbc.sunnypilot.car.tesla.icbm import IntelligentCruiseButtonManagementInterface, SendButtonState
 from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP, TeslaSafetyFlagsSP
@@ -218,6 +219,20 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
     _initialize_tesla_turn_signal_validation(cp, cp_sp, {"TeslaTurnSignalValidation": "1"})
     self.assertTrue(cp_sp.flags & TeslaFlagsSP.TURN_SIGNAL_VALIDATION)
     self.assertTrue(cp_sp.safetyParam & TeslaSafetyFlagsSP.TURN_SIGNAL_VALIDATION)
+
+  def test_speed_button_validation_is_separate_from_automatic_buttons(self):
+    cp = SimpleNamespace(brand="tesla")
+    cp_sp = SimpleNamespace(flags=0, safetyParam=0, intelligentCruiseButtonManagementAvailable=False)
+    _initialize_tesla_speed_button_validation(cp, cp_sp, {"TeslaSpeedButtonValidation": "1"})
+    self.assertEqual(cp_sp.flags, 0)
+    self.assertEqual(cp_sp.safetyParam, 0)
+
+    cp_sp.flags = TeslaFlagsSP.HAS_VEHICLE_BUS
+    _initialize_tesla_speed_button_validation(cp, cp_sp, {"TeslaSpeedButtonValidation": "1"})
+    self.assertTrue(cp_sp.flags & TeslaFlagsSP.SPEED_BUTTON_VALIDATION)
+    self.assertTrue(cp_sp.safetyParam & TeslaSafetyFlagsSP.SPEED_BUTTON_VALIDATION)
+    self.assertFalse(cp_sp.flags & TeslaFlagsSP.SPEED_LIMIT_CRUISE_BUTTONS)
+    self.assertFalse(cp_sp.intelligentCruiseButtonManagementAvailable)
 
   def test_ap_hybrid_initialization_requires_openpilot_longitudinal(self):
     cp = SimpleNamespace(brand="tesla", openpilotLongitudinalControl=False)

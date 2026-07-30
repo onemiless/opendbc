@@ -15,6 +15,9 @@
 #define TESLA_VEHICLE_BUS_ADDR_CHECK \
   {.msg = {{0x3DF, 1, 8, 2U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true, .ignore_frequency_check = true}, { 0 }, { 0 }}},    /* UI_status2 */ \
 
+#define TESLA_SPEED_BUTTON_VALIDATION_RX_CHECK \
+  {.msg = {{0x238, 1, 8, 2U, .max_counter = 15U, .ignore_quality_flag = true, .ignore_frequency_check = true}, { 0 }, { 0 }}},   /* STW_ACTN_RQ */ \
+
 #define TESLA_STEERING_DISENGAGE_TORQUE 500 // cNm
 
 static bool tesla_longitudinal = false;
@@ -51,8 +54,14 @@ static bool tesla_ap_hybrid_lateral_handoff = false;
 static bool tesla_ap_stock_lateral_active = false;
 static bool tesla_speed_limit_cruise_buttons = false;
 static bool tesla_turn_signal_validation = false;
+static bool tesla_speed_button_validation = false;
 static uint8_t tesla_turn_signal_active_frames = 0U;
 static uint8_t tesla_turn_signal_active_state = 0U;
+static bool tesla_speed_button_rx_template_valid = false;
+static uint8_t tesla_speed_button_rx_template[6] = {0U};
+static uint32_t tesla_speed_button_rx_timestamp = 0U;
+static uint8_t tesla_speed_button_active_frames = 0U;
+static uint8_t tesla_speed_button_active_state = 0U;
 
 static uint8_t tesla_sccm_left_stalk_crc(const CANPacket_t *msg) {
   const uint8_t magic_bytes[16] = {0x9BU, 0xE8U, 0x2AU, 0xD3U, 0xD3U, 0x83U, 0x4CU, 0x5EU,
@@ -86,6 +95,9 @@ static uint8_t tesla_get_counter(const CANPacket_t *msg) {
   } else if (msg->addr == 0x370U) {
     // Signal: EPAS3S_sysStatusCounter
     cnt = msg->data[6] & 0x0FU;
+  } else if (msg->addr == 0x238U) {
+    // Signal: MC_STW_ACTN_RQ
+    cnt = msg->data[6] >> 4;
   } else {
   }
   return cnt;
@@ -239,6 +251,19 @@ static void tesla_rx_hook(const CANPacket_t *msg) {
   }
 
   if (msg->bus == 1U) {
+    // Preserve only a checksum-valid, inverse-encoded idle frame received from
+    // the vehicle. One-shot speed-button validation must clone this fresh
+    // template instead of constructing unrelated fields.
+    if ((msg->addr == 0x238U) && (GET_LEN(msg) == 8U) &&
+        (msg->data[0] == 0xB0U) && (tesla_compute_checksum(msg) == tesla_get_checksum(msg))) {
+      for (uint8_t i = 0U; i < 5U; i++) {
+        tesla_speed_button_rx_template[i] = msg->data[i + 1U];
+      }
+      tesla_speed_button_rx_template[5] = msg->data[6] & 0x0FU;
+      tesla_speed_button_rx_timestamp = microsecond_timer_get();
+      tesla_speed_button_rx_template_valid = true;
+    }
+
     if (msg->addr == 0x3DFU) {
       if (tesla_mads_screen_button_fingers != 0U) {
         mads_button_press = (msg->data[3] == tesla_mads_screen_button_fingers) ? MADS_BUTTON_PRESSED : MADS_BUTTON_NOT_PRESSED;
@@ -389,20 +414,45 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
   // STW_ACTN_RQ: speed-control lever emulation for Tesla speed limit cruise buttons.
   if (msg->addr == 0x238U) {
     int speed_control_state = msg->data[0] & 0x3FU;
-    bool valid_speed_button = (speed_control_state == 0) ||   // IDLE
-                              (speed_control_state == 16) ||  // UP_1ST
-                              (speed_control_state == 32);    // DN_1ST
-    bool other_fields_clear = ((msg->data[0] & 0xC0U) == 0U) &&
-                              (msg->data[1] == 0U) &&
-                              (msg->data[2] == 0U) &&
-                              (msg->data[3] == 0U) &&
-                              (msg->data[4] == 0U) &&
-                              (msg->data[5] == 0U) &&
-                              ((msg->data[6] & 0x0FU) == 0U);
-    uint8_t chksum = tesla_compute_checksum(msg);
-    if (!tesla_speed_limit_cruise_buttons || !valid_speed_button || !other_fields_clear ||
-        (chksum != tesla_get_checksum(msg))) {
+    const bool valid_speed_button = (speed_control_state == 0) ||   // IDLE
+                                    (speed_control_state == 16) ||  // UP_1ST
+                                    (speed_control_state == 32);    // DN_1ST
+    const bool other_fields_clear = ((msg->data[0] & 0xC0U) == 0U) &&
+                                    (msg->data[1] == 0U) &&
+                                    (msg->data[2] == 0U) &&
+                                    (msg->data[3] == 0U) &&
+                                    (msg->data[4] == 0U) &&
+                                    (msg->data[5] == 0U) &&
+                                    ((msg->data[6] & 0x0FU) == 0U);
+    const bool automatic_button_valid = tesla_speed_limit_cruise_buttons && valid_speed_button && other_fields_clear;
+
+    const bool validation_state_allowed = (speed_control_state == 16) || (speed_control_state == 32) ||
+                                          (speed_control_state == 48);
+    const bool validation_active = speed_control_state != 48;
+    bool validation_template_matches = ((msg->data[0] & 0xC0U) == 0x80U) &&
+                                       ((msg->data[6] & 0x0FU) == tesla_speed_button_rx_template[5]);
+    for (uint8_t i = 0U; i < 5U; i++) {
+      validation_template_matches &= msg->data[i + 1U] == tesla_speed_button_rx_template[i];
+    }
+    const bool validation_template_fresh = tesla_speed_button_rx_template_valid &&
+      (safety_get_ts_elapsed(microsecond_timer_get(), tesla_speed_button_rx_timestamp) <= 1500000U);
+    const bool validation_direction_allowed = !validation_active || (tesla_speed_button_active_state == 0U) ||
+                                              (tesla_speed_button_active_state == speed_control_state);
+    const bool validation_pulse_allowed = !validation_active || (tesla_speed_button_active_frames < 2U);
+    const bool validation_button_valid = tesla_has_vehicle_bus && tesla_speed_button_validation && validation_state_allowed &&
+      validation_template_matches && validation_template_fresh && validation_direction_allowed && validation_pulse_allowed;
+
+    const bool checksum_valid = tesla_compute_checksum(msg) == tesla_get_checksum(msg);
+    if ((!automatic_button_valid && !validation_button_valid) || !checksum_valid) {
       violation = true;
+    } else if (validation_button_valid) {
+      if (validation_active) {
+        tesla_speed_button_active_frames++;
+        tesla_speed_button_active_state = speed_control_state;
+      } else {
+        tesla_speed_button_active_frames = 0U;
+        tesla_speed_button_active_state = 0U;
+      }
     }
   }
 
@@ -535,6 +585,7 @@ static safety_config tesla_init(uint16_t param) {
   const uint16_t TESLA_PARAM_SP_AP_HYBRID_HANDOFF = 64;
   const uint16_t TESLA_PARAM_SP_AP_HYBRID_LATERAL_HANDOFF = 128;
   const uint16_t TESLA_PARAM_SP_TURN_SIGNAL_VALIDATION = 256;
+  const uint16_t TESLA_PARAM_SP_SPEED_BUTTON_VALIDATION = 512;
 
   tesla_has_vehicle_bus = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_VEHICLE_BUS);
 
@@ -553,6 +604,7 @@ static safety_config tesla_init(uint16_t param) {
   tesla_ap_hybrid_handoff = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_AP_HYBRID_HANDOFF);
   tesla_ap_hybrid_lateral_handoff = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_AP_HYBRID_LATERAL_HANDOFF);
   tesla_turn_signal_validation = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_TURN_SIGNAL_VALIDATION);
+  tesla_speed_button_validation = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_SPEED_BUTTON_VALIDATION);
 
   tesla_stock_aeb = false;
   tesla_stock_steering_control = false;
@@ -561,6 +613,13 @@ static safety_config tesla_init(uint16_t param) {
   tesla_ap_stock_lateral_active = false;
   tesla_turn_signal_active_frames = 0U;
   tesla_turn_signal_active_state = 0U;
+  tesla_speed_button_rx_template_valid = false;
+  tesla_speed_button_rx_timestamp = 0U;
+  tesla_speed_button_active_frames = 0U;
+  tesla_speed_button_active_state = 0U;
+  for (uint8_t i = 0U; i < 6U; i++) {
+    tesla_speed_button_rx_template[i] = 0U;
+  }
   // we need to assume Autopark/Summon on startup since DI_state is a low freq msg.
   // this is so that we don't fault if starting while these systems are active
   tesla_summon = true;
@@ -575,6 +634,17 @@ static safety_config tesla_init(uint16_t param) {
     TESLA_VEHICLE_BUS_ADDR_CHECK
   };
 
+  static RxCheck tesla_model3_y_speed_button_validation_rx_checks[] = {
+    TESLA_COMMON_RX_CHECKS
+    TESLA_SPEED_BUTTON_VALIDATION_RX_CHECK
+  };
+
+  static RxCheck tesla_model3_y_vehicle_bus_speed_button_validation_rx_checks[] = {
+    TESLA_COMMON_RX_CHECKS
+    TESLA_VEHICLE_BUS_ADDR_CHECK
+    TESLA_SPEED_BUTTON_VALIDATION_RX_CHECK
+  };
+
   safety_config ret;
   if (tesla_longitudinal) {
     SET_TX_MSGS(TESLA_M3_Y_LONG_TX_MSGS, ret);
@@ -582,7 +652,11 @@ static safety_config tesla_init(uint16_t param) {
     SET_TX_MSGS(TESLA_M3_Y_TX_MSGS, ret);
   }
 
-  if (tesla_has_vehicle_bus) {
+  if (tesla_has_vehicle_bus && tesla_speed_button_validation) {
+    SET_RX_CHECKS(tesla_model3_y_vehicle_bus_speed_button_validation_rx_checks, ret);
+  } else if (tesla_speed_button_validation) {
+    SET_RX_CHECKS(tesla_model3_y_speed_button_validation_rx_checks, ret);
+  } else if (tesla_has_vehicle_bus) {
     SET_RX_CHECKS(tesla_model3_y_vehicle_bus_rx_checks, ret);
   } else {
     SET_RX_CHECKS(tesla_model3_y_rx_checks, ret);

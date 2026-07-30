@@ -24,6 +24,7 @@ class TeslaFlagsSP(IntFlag):
   AP_HYBRID_STOCK_LATERAL_ACTIVE = 8192  # Runtime: Tesla AP owns lateral control
   AP_HYBRID_EXIT_RECOVERY_ACTIVE = 16384  # Runtime: preserve MADS while Tesla AP/LKAS settles after exit
   TURN_SIGNAL_VALIDATION = 32768  # Config: stationary one-shot SCCM left-stalk validation
+  SPEED_BUTTON_VALIDATION = 65536  # Config: one-shot replay of a fresh original 0x238 vehicle template
 
 
 class MadsScreenButtonType:
@@ -43,3 +44,4 @@ class TeslaSafetyFlagsSP:
   AP_HYBRID_HANDOFF = 64
   AP_HYBRID_LATERAL_HANDOFF = 128
   TURN_SIGNAL_VALIDATION = 256
+  SPEED_BUTTON_VALIDATION = 512

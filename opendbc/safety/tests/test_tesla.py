@@ -169,6 +169,30 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
     self.safety.init_tests()
     self._rx(self._vehicle_moving_msg(0))
 
+  def _enable_speed_button_validation(self):
+    self.addCleanup(self.safety.set_current_safety_param_sp, 0)
+    self.safety.set_current_safety_param_sp(TeslaSafetyFlagsSP.HAS_VEHICLE_BUS | TeslaSafetyFlagsSP.SPEED_BUTTON_VALIDATION)
+    self.safety.set_safety_hooks(CarParams.SafetyModel.tesla, self.SAFETY_PARAM)
+    self.safety.init_tests()
+
+  def _observed_stw_action_msg(self, speed_control_state=48, counter=0, distance=45):
+    return self._stw_action_msg(speed_control_state, counter, values={
+      "SpdCtrlLvrStat_Inv": 1,
+      "DTR_Dist_Rq": distance,
+      "HiBmLvr_Stat": 3,
+      "WprWashSw_Psd": 1,
+      "WprWash_R_Sw_Posn_V2": 2,
+      "StW_Cond_Flt": 1,
+      "StW_Cond_Psd": 1,
+      "HrnSw_Psd": 3,
+      "StW_Sw00_Psd": 1,
+      "StW_Sw01_Psd": 1,
+      "StW_Sw02_Psd": 1,
+      "StW_Sw03_Psd": 1,
+      "StW_Sw04_Psd": 1,
+      "WprSw6Posn": 6,
+    })
+
   def test_turn_signal_validation_requires_flag(self):
     self.assertFalse(self._tx(self._sccm_left_stalk_msg(2, 0)))
 
@@ -236,6 +260,40 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
     bad_checksum = self._stw_action_msg(16)
     bad_checksum[0].data[7] ^= 0xFF
     self.assertFalse(self._tx(bad_checksum))
+
+  def test_speed_button_validation_replays_only_fresh_rx_template(self):
+    self._enable_speed_button_validation()
+    self.assertFalse(self._tx(self._observed_stw_action_msg(32, 2)))
+
+    self.assertTrue(self._rx(self._observed_stw_action_msg(48, 1)))
+    self.assertTrue(self._tx(self._observed_stw_action_msg(32, 2)))
+    self.assertTrue(self._tx(self._observed_stw_action_msg(48, 3)))
+    self.assertTrue(self._tx(self._observed_stw_action_msg(16, 4)))
+
+    self.assertFalse(self._tx(self._observed_stw_action_msg(32, 5, distance=33)))
+    bad_checksum = self._observed_stw_action_msg(32, 5)
+    bad_checksum[0].data[7] ^= 0xFF
+    self.assertFalse(self._tx(bad_checksum))
+
+    self.safety.set_timer(1_500_001)
+    self.assertFalse(self._tx(self._observed_stw_action_msg(32, 5)))
+
+  def test_speed_button_validation_requires_vehicle_bus_flag(self):
+    self.addCleanup(self.safety.set_current_safety_param_sp, 0)
+    self.safety.set_current_safety_param_sp(TeslaSafetyFlagsSP.SPEED_BUTTON_VALIDATION)
+    self.safety.set_safety_hooks(CarParams.SafetyModel.tesla, self.SAFETY_PARAM)
+    self.safety.init_tests()
+    self.assertTrue(self._rx(self._observed_stw_action_msg(48, 1)))
+    self.assertFalse(self._tx(self._observed_stw_action_msg(32, 2)))
+
+  def test_speed_button_validation_limits_active_pulse(self):
+    self._enable_speed_button_validation()
+    self.assertTrue(self._rx(self._observed_stw_action_msg(48, 1)))
+    self.assertTrue(self._tx(self._observed_stw_action_msg(32, 2)))
+    self.assertTrue(self._tx(self._observed_stw_action_msg(32, 3)))
+    self.assertFalse(self._tx(self._observed_stw_action_msg(32, 4)))
+    self.assertTrue(self._tx(self._observed_stw_action_msg(48, 5)))
+    self.assertTrue(self._tx(self._observed_stw_action_msg(16, 6)))
 
   def _accel_msg(self, accel: float):
     # For common.LongitudinalAccelSafetyTest
