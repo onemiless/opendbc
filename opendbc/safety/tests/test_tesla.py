@@ -237,29 +237,10 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
     self.assertTrue(self._tx(self._sccm_left_stalk_msg(0, 6)))
     self.assertTrue(self._tx(self._sccm_left_stalk_msg(6, 7)))
 
-  def test_stw_action_request_requires_speed_limit_cruise_button_flag(self):
+  def test_stw_action_request_rejects_legacy_zero_template(self):
     for speed_control_state in (0, 16, 32):
       with self.subTest(speed_control_state=speed_control_state):
         self.assertFalse(self._tx(self._stw_action_msg(speed_control_state=speed_control_state)))
-
-  def test_stw_action_request_speed_limit_cruise_buttons(self):
-    self.addCleanup(self.safety.set_current_safety_param_sp, 0)
-    self.safety.set_current_safety_param_sp(TeslaSafetyFlagsSP.SPEED_LIMIT_CRUISE_BUTTONS)
-    self.safety.set_safety_hooks(CarParams.SafetyModel.tesla, self.SAFETY_PARAM)
-    self.safety.init_tests()
-
-    for speed_control_state in (0, 16, 32):
-      with self.subTest(speed_control_state=speed_control_state):
-        self.assertTrue(self._tx(self._stw_action_msg(speed_control_state=speed_control_state)))
-
-    for speed_control_state in (1, 2, 4, 8):
-      with self.subTest(speed_control_state=speed_control_state):
-        self.assertFalse(self._tx(self._stw_action_msg(speed_control_state=speed_control_state)))
-
-    self.assertFalse(self._tx(self._stw_action_msg(16, values={"DTR_Dist_Rq": 33})))
-    bad_checksum = self._stw_action_msg(16)
-    bad_checksum[0].data[7] ^= 0xFF
-    self.assertFalse(self._tx(bad_checksum))
 
   def test_speed_button_validation_replays_only_fresh_rx_template(self):
     self._enable_speed_button_validation()

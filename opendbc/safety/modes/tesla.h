@@ -52,7 +52,6 @@ static bool tesla_dynamic_auto_stock = false;
 static bool tesla_ap_hybrid_handoff = false;
 static bool tesla_ap_hybrid_lateral_handoff = false;
 static bool tesla_ap_stock_lateral_active = false;
-static bool tesla_speed_limit_cruise_buttons = false;
 static bool tesla_turn_signal_validation = false;
 static bool tesla_speed_button_validation = false;
 static uint8_t tesla_turn_signal_active_frames = 0U;
@@ -411,21 +410,9 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
     }
   }
 
-  // STW_ACTN_RQ: speed-control lever emulation for Tesla speed limit cruise buttons.
+  // STW_ACTN_RQ: one-shot validation cloned from a fresh, checksum-valid vehicle RX frame.
   if (msg->addr == 0x238U) {
     int speed_control_state = msg->data[0] & 0x3FU;
-    const bool valid_speed_button = (speed_control_state == 0) ||   // IDLE
-                                    (speed_control_state == 16) ||  // UP_1ST
-                                    (speed_control_state == 32);    // DN_1ST
-    const bool other_fields_clear = ((msg->data[0] & 0xC0U) == 0U) &&
-                                    (msg->data[1] == 0U) &&
-                                    (msg->data[2] == 0U) &&
-                                    (msg->data[3] == 0U) &&
-                                    (msg->data[4] == 0U) &&
-                                    (msg->data[5] == 0U) &&
-                                    ((msg->data[6] & 0x0FU) == 0U);
-    const bool automatic_button_valid = tesla_speed_limit_cruise_buttons && valid_speed_button && other_fields_clear;
-
     const bool validation_state_allowed = (speed_control_state == 16) || (speed_control_state == 32) ||
                                           (speed_control_state == 48);
     const bool validation_active = speed_control_state != 48;
@@ -443,7 +430,7 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
       validation_template_matches && validation_template_fresh && validation_direction_allowed && validation_pulse_allowed;
 
     const bool checksum_valid = tesla_compute_checksum(msg) == tesla_get_checksum(msg);
-    if ((!automatic_button_valid && !validation_button_valid) || !checksum_valid) {
+    if (!validation_button_valid || !checksum_valid) {
       violation = true;
     } else if (validation_button_valid) {
       if (validation_active) {
@@ -581,7 +568,6 @@ static safety_config tesla_init(uint16_t param) {
   const uint16_t TESLA_PARAM_SP_MADS_SCREEN_BUTTON_4_FINGER = 4;
   const uint16_t TESLA_PARAM_SP_MADS_SCREEN_BUTTON_5_FINGER = 8;
   const uint16_t TESLA_PARAM_SP_DYNAMIC_AUTO_STOCK = 16;
-  const uint16_t TESLA_PARAM_SP_SPEED_LIMIT_CRUISE_BUTTONS = 32;
   const uint16_t TESLA_PARAM_SP_AP_HYBRID_HANDOFF = 64;
   const uint16_t TESLA_PARAM_SP_AP_HYBRID_LATERAL_HANDOFF = 128;
   const uint16_t TESLA_PARAM_SP_TURN_SIGNAL_VALIDATION = 256;
@@ -600,7 +586,6 @@ static safety_config tesla_init(uint16_t param) {
   }
 
   tesla_dynamic_auto_stock = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_DYNAMIC_AUTO_STOCK);
-  tesla_speed_limit_cruise_buttons = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_SPEED_LIMIT_CRUISE_BUTTONS);
   tesla_ap_hybrid_handoff = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_AP_HYBRID_HANDOFF);
   tesla_ap_hybrid_lateral_handoff = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_AP_HYBRID_LATERAL_HANDOFF);
   tesla_turn_signal_validation = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_TURN_SIGNAL_VALIDATION);

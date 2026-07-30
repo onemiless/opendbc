@@ -15,7 +15,6 @@ class TeslaFlagsSP(IntFlag):
   MADS_SCREEN_BUTTON_5_FINGER = 16
   STOCK_LONGITUDINAL_ACTIVE = 32  # Runtime toggle: 4-finger touch switches to stock (OEM) longitudinal control
   DYNAMIC_AUTO_STOCK = 64
-  SPEED_LIMIT_CRUISE_BUTTONS = 128
   AP_HYBRID = 256  # Config: keep an AP session active with sunnypilot lateral control
   AP_HYBRID_ACTIVE = 512  # Runtime: AP hybrid session active; longitudinal may be SP or Tesla
   DYNAMIC_STOCK_ACTIVE = 1024  # Runtime source: Dynamic ACC selected stock longitudinal
@@ -40,7 +39,6 @@ class TeslaSafetyFlagsSP:
   MADS_SCREEN_BUTTON_4_FINGER = 4
   MADS_SCREEN_BUTTON_5_FINGER = 8
   DYNAMIC_AUTO_STOCK = 16
-  SPEED_LIMIT_CRUISE_BUTTONS = 32
   AP_HYBRID_HANDOFF = 64
   AP_HYBRID_LATERAL_HANDOFF = 128
   TURN_SIGNAL_VALIDATION = 256

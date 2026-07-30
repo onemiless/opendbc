@@ -20,7 +20,6 @@ from opendbc.sunnypilot.car.tesla import dynamic_acc_debug
 from opendbc.sunnypilot.car.interfaces import (_initialize_tesla_ap_hybrid, _initialize_tesla_dynamic_auto_stock,
                                                _initialize_tesla_speed_button_validation,
                                                _initialize_tesla_turn_signal_validation)
-from opendbc.sunnypilot.car.tesla.icbm import IntelligentCruiseButtonManagementInterface, SendButtonState
 from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP, TeslaSafetyFlagsSP
 
 Ecu = CarParams.Ecu
@@ -195,7 +194,7 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
     self.assertTrue(cp_sp.flags & TeslaFlagsSP.DYNAMIC_AP_LONGITUDINAL)
     self.assertTrue(cp_sp.safetyParam & TeslaSafetyFlagsSP.AP_HYBRID_HANDOFF)
 
-  def test_dynamic_thresholds_do_not_overlap_speed_button_permission(self):
+  def test_dynamic_thresholds_enable_only_dynamic_handoff(self):
     cp = SimpleNamespace(brand="tesla", openpilotLongitudinalControl=True)
     cp_sp = SimpleNamespace(flags=0, safetyParam=0)
 
@@ -206,7 +205,6 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
     })
 
     self.assertEqual(TeslaSafetyFlagsSP.DYNAMIC_AUTO_STOCK, cp_sp.safetyParam)
-    self.assertFalse(cp_sp.safetyParam & TeslaSafetyFlagsSP.SPEED_LIMIT_CRUISE_BUTTONS)
 
   def test_turn_signal_validation_initialization_requires_vehicle_bus(self):
     cp = SimpleNamespace(brand="tesla")
@@ -220,7 +218,7 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
     self.assertTrue(cp_sp.flags & TeslaFlagsSP.TURN_SIGNAL_VALIDATION)
     self.assertTrue(cp_sp.safetyParam & TeslaSafetyFlagsSP.TURN_SIGNAL_VALIDATION)
 
-  def test_speed_button_validation_is_separate_from_automatic_buttons(self):
+  def test_speed_button_validation_does_not_enable_icbm(self):
     cp = SimpleNamespace(brand="tesla")
     cp_sp = SimpleNamespace(flags=0, safetyParam=0, intelligentCruiseButtonManagementAvailable=False)
     _initialize_tesla_speed_button_validation(cp, cp_sp, {"TeslaSpeedButtonValidation": "1"})
@@ -231,7 +229,6 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
     _initialize_tesla_speed_button_validation(cp, cp_sp, {"TeslaSpeedButtonValidation": "1"})
     self.assertTrue(cp_sp.flags & TeslaFlagsSP.SPEED_BUTTON_VALIDATION)
     self.assertTrue(cp_sp.safetyParam & TeslaSafetyFlagsSP.SPEED_BUTTON_VALIDATION)
-    self.assertFalse(cp_sp.flags & TeslaFlagsSP.SPEED_LIMIT_CRUISE_BUTTONS)
     self.assertFalse(cp_sp.intelligentCruiseButtonManagementAvailable)
 
   def test_ap_hybrid_initialization_requires_openpilot_longitudinal(self):
@@ -790,20 +787,6 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
     self.assertEqual(TeslaLongitudinalSource.sp, car_state.tesla_longitudinal_source)
     self.assertTrue(car_state._update_ap_hybrid(ret, 3, 80.0, lateral_control_ready=True))
 
-  def test_speed_limit_buttons_distinguish_stock_longitudinal_source(self):
-    interface = IntelligentCruiseButtonManagementInterface.__new__(IntelligentCruiseButtonManagementInterface)
-    interface.CP_SP = SimpleNamespace(flags=TeslaFlagsSP.SPEED_LIMIT_CRUISE_BUTTONS)
-    interface.button_frame = 0
-    cc_sp = SimpleNamespace(intelligentCruiseButtonManagement=SimpleNamespace(sendButton=SendButtonState.increase))
-    tesla_can = SimpleNamespace(create_stw_action_request=lambda button, counter: (button, counter))
-
-    for source, expected_count in ((TeslaLongitudinalSource.dynamicStock, 1),
-                                   (TeslaLongitudinalSource.manualStock, 1),
-                                   (TeslaLongitudinalSource.apHybridStock, 0)):
-      cs = SimpleNamespace(tesla_stock_longitudinal_active=True, tesla_longitudinal_source=source, stw_action_counter=1)
-      sends = interface.update(cc_sp, cs, tesla_can, frame=100, last_button_frame=0)
-      self.assertEqual(expected_count, len(sends), source)
-
   def test_ap_hybrid_ignores_dynamic_force_requests(self):
     car_state = self._override_state(TeslaLongitudinalSource.apHybridStock)
     car_state._ap_hybrid_enabled = True
@@ -920,13 +903,3 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
     _, actual, _ = tesla_can.create_stock_lateral_handoff(12.5)
 
     self.assertEqual(3, actual[2] >> 6)
-
-  def test_stw_action_request(self):
-    tesla_can = TeslaCAN(SimpleNamespace(flags=0), CANPacker("tesla_model3_party"), CANPacker("tesla_model3_vehicle"))
-
-    addr, dat, bus = tesla_can.create_stw_action_request(16, 7)
-
-    self.assertEqual(0x238, addr)
-    self.assertEqual(CANBUS.vehicle, bus)
-    self.assertEqual(16, dat[0] & 0x3F)
-    self.assertEqual(7, dat[6] >> 4)

@@ -29,7 +29,6 @@ class CarState(CarStateBase, CarStateExt):
     self.prev_speed_control_state = 0
     self.das_control = None
     self.das_steering_control = None
-    self.stw_action_counter = 0
 
   def update_summon_state(self, summon_state: str, cruise_enabled: bool):
     summon_now = summon_state in ("ACTIVE", "COMPLETE", "SELFPARK_STARTED")
@@ -135,7 +134,6 @@ class CarState(CarStateBase, CarStateExt):
           },
         ))
         self.prev_speed_control_state = speed_control_state
-        self.stw_action_counter = int(stw_action["MC_STW_ACTN_RQ"])
       except Exception:
         pass
 
