@@ -66,6 +66,19 @@ class CarStateExt:
     self._stock_counter_last = None
     self._init_longitudinal_override_state()
     self._read_dyn_params()
+    self.tesla_speed_button_template = None
+    self.tesla_speed_button_template_nanos = 0
+    self.tesla_speed_limit_target = 0.0
+    self.tesla_speed_limit_target_valid = False
+
+  def update_speed_button_template(self, data: bytes, monotonic_nanos: int) -> None:
+    if len(data) == 8 and (data[0] & 0x03) == 1 and (data[3] & 0x3F) == 0:
+      self.tesla_speed_button_template = bytes(data)
+      self.tesla_speed_button_template_nanos = int(monotonic_nanos)
+
+  def update_speed_limit_target(self, target: float, valid: bool) -> None:
+    self.tesla_speed_limit_target = float(target) if valid else 0.0
+    self.tesla_speed_limit_target_valid = bool(valid)
 
   def _init_longitudinal_override_state(self) -> None:
     self.tesla_longitudinal_source = TeslaLongitudinalSource.sp

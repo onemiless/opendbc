@@ -90,6 +90,7 @@ def setup_interfaces(CI, CP: structs.CarParams, CP_SP: structs.CarParamsSP,
   _initialize_tesla_ap_hybrid(CP, CP_SP, params_dict)
   _initialize_tesla_turn_signal_validation(CP, CP_SP, params_dict)
   _initialize_tesla_speed_button_validation(CP, CP_SP, params_dict)
+  _initialize_tesla_auto_speed_limit(CP, CP_SP, params_dict)
   _initialize_radar_tracks(CP, CP_SP, can_recv, can_send)
   _initialize_stop_and_go(CP, CP_SP, params_dict)
   _initialize_toyota(CP, CP_SP, params_dict)
@@ -164,6 +165,14 @@ def _initialize_tesla_speed_button_validation(CP: structs.CarParams, CP_SP: stru
       int(params_dict.get("TeslaSpeedButtonValidation", 0)) == 1):
     CP_SP.flags |= TeslaFlagsSP.SPEED_BUTTON_VALIDATION.value
     CP_SP.safetyParam |= TeslaSafetyFlagsSP.SPEED_BUTTON_VALIDATION
+
+
+def _initialize_tesla_auto_speed_limit(CP: structs.CarParams, CP_SP: structs.CarParamsSP,
+                                       params_dict: dict[str, str]) -> None:
+  if (CP.brand == 'tesla' and CP.openpilotLongitudinalControl and
+      CP_SP.flags & TeslaFlagsSP.HAS_VEHICLE_BUS and int(params_dict.get("TeslaAutoSpeedLimit", 0)) == 1):
+    CP_SP.flags |= TeslaFlagsSP.AUTO_SPEED_LIMIT.value
+    CP_SP.safetyParam |= TeslaSafetyFlagsSP.AUTO_SPEED_LIMIT
 
 
 def _initialize_radar_tracks(CP: structs.CarParams, CP_SP: structs.CarParamsSP,

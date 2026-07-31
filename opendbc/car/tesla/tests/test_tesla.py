@@ -17,7 +17,8 @@ from opendbc.car.tesla.teslacan import TeslaCAN, create_sccm_left_stalk
 from opendbc.car.tesla.values import CANBUS, CAR, FSD_14_FW, TeslaFlags, TeslaSafetyFlags
 from opendbc.sunnypilot.car.tesla.carstate_ext import AP_HYBRID_EXIT_RECOVERY_CONFIRM_SAMPLES, CarStateExt, TeslaLongitudinalSource
 from opendbc.sunnypilot.car.tesla import dynamic_acc_debug
-from opendbc.sunnypilot.car.interfaces import (_initialize_tesla_ap_hybrid, _initialize_tesla_dynamic_auto_stock,
+from opendbc.sunnypilot.car.interfaces import (_initialize_tesla_ap_hybrid, _initialize_tesla_auto_speed_limit,
+                                               _initialize_tesla_dynamic_auto_stock,
                                                _initialize_tesla_speed_button_validation,
                                                _initialize_tesla_turn_signal_validation)
 from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP, TeslaSafetyFlagsSP
@@ -230,6 +231,17 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
     self.assertTrue(cp_sp.flags & TeslaFlagsSP.SPEED_BUTTON_VALIDATION)
     self.assertTrue(cp_sp.safetyParam & TeslaSafetyFlagsSP.SPEED_BUTTON_VALIDATION)
     self.assertFalse(cp_sp.intelligentCruiseButtonManagementAvailable)
+
+  def test_auto_speed_limit_initialization_requires_vehicle_bus_and_sp_longitudinal(self):
+    cp = SimpleNamespace(brand="tesla", openpilotLongitudinalControl=True)
+    cp_sp = SimpleNamespace(flags=0, safetyParam=0)
+    _initialize_tesla_auto_speed_limit(cp, cp_sp, {"TeslaAutoSpeedLimit": "1"})
+    self.assertEqual(cp_sp.flags, 0)
+
+    cp_sp.flags = TeslaFlagsSP.HAS_VEHICLE_BUS
+    _initialize_tesla_auto_speed_limit(cp, cp_sp, {"TeslaAutoSpeedLimit": "1"})
+    self.assertTrue(cp_sp.flags & TeslaFlagsSP.AUTO_SPEED_LIMIT)
+    self.assertTrue(cp_sp.safetyParam & TeslaSafetyFlagsSP.AUTO_SPEED_LIMIT)
 
   def test_ap_hybrid_initialization_requires_openpilot_longitudinal(self):
     cp = SimpleNamespace(brand="tesla", openpilotLongitudinalControl=False)

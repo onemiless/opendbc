@@ -55,6 +55,7 @@ static bool tesla_ap_hybrid_lateral_handoff = false;
 static bool tesla_ap_stock_lateral_active = false;
 static bool tesla_turn_signal_validation = false;
 static bool tesla_speed_button_validation = false;
+static bool tesla_auto_speed_limit = false;
 static uint8_t tesla_turn_signal_active_state = 0U;
 static bool tesla_turn_signal_rx_template_valid = false;
 static uint8_t tesla_turn_signal_rx_template[8] = {0U};
@@ -420,7 +421,9 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
       (safety_get_ts_elapsed(microsecond_timer_get(), tesla_speed_button_rx_timestamp) <= 1500000U);
     const bool validation_rate_allowed = !tesla_speed_button_last_tx_valid ||
       (safety_get_ts_elapsed(microsecond_timer_get(), tesla_speed_button_last_tx_timestamp) >= 250000U);
-    const bool validation_button_valid = tesla_has_vehicle_bus && tesla_speed_button_validation &&
+    const bool validation_mode_allowed = tesla_speed_button_validation && !controls_allowed && !controls_allowed_lateral;
+    const bool automatic_mode_allowed = tesla_auto_speed_limit && controls_allowed;
+    const bool validation_button_valid = tesla_has_vehicle_bus && (validation_mode_allowed || automatic_mode_allowed) &&
       validation_tick_allowed && validation_template_matches && validation_template_fresh && validation_rate_allowed;
     if (!validation_button_valid) {
       violation = true;
@@ -451,7 +454,7 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
     const bool transition_valid = active_turn ? (tesla_turn_signal_active_state == 0U) :
                                                 (tesla_turn_signal_active_state != 0U);
     const bool checksum_valid = tesla_compute_checksum(msg) == tesla_get_checksum(msg);
-    const bool valid = tesla_has_vehicle_bus && tesla_turn_signal_validation && request_reason_valid &&
+    const bool valid = tesla_has_vehicle_bus && tesla_turn_signal_validation && !controls_allowed && !controls_allowed_lateral && request_reason_valid &&
                        validation_template_matches && validation_template_fresh && transition_valid && checksum_valid;
     if (!valid) {
       violation = true;
@@ -567,6 +570,7 @@ static safety_config tesla_init(uint16_t param) {
   const uint16_t TESLA_PARAM_SP_AP_HYBRID_LATERAL_HANDOFF = 128;
   const uint16_t TESLA_PARAM_SP_TURN_SIGNAL_VALIDATION = 256;
   const uint16_t TESLA_PARAM_SP_SPEED_BUTTON_VALIDATION = 512;
+  const uint16_t TESLA_PARAM_SP_AUTO_SPEED_LIMIT = 1024;
 
   tesla_has_vehicle_bus = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_VEHICLE_BUS);
 
@@ -585,6 +589,7 @@ static safety_config tesla_init(uint16_t param) {
   tesla_ap_hybrid_lateral_handoff = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_AP_HYBRID_LATERAL_HANDOFF);
   tesla_turn_signal_validation = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_TURN_SIGNAL_VALIDATION);
   tesla_speed_button_validation = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_SPEED_BUTTON_VALIDATION);
+  tesla_auto_speed_limit = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_AUTO_SPEED_LIMIT);
 
   tesla_stock_aeb = false;
   tesla_stock_steering_control = false;
@@ -634,9 +639,9 @@ static safety_config tesla_init(uint16_t param) {
     SET_TX_MSGS(TESLA_M3_Y_TX_MSGS, ret);
   }
 
-  if (tesla_has_vehicle_bus && tesla_speed_button_validation) {
+  if (tesla_has_vehicle_bus && (tesla_speed_button_validation || tesla_auto_speed_limit)) {
     SET_RX_CHECKS(tesla_model3_y_vehicle_bus_speed_button_validation_rx_checks, ret);
-  } else if (tesla_speed_button_validation) {
+  } else if (tesla_speed_button_validation || tesla_auto_speed_limit) {
     SET_RX_CHECKS(tesla_model3_y_speed_button_validation_rx_checks, ret);
   } else if (tesla_has_vehicle_bus) {
     SET_RX_CHECKS(tesla_model3_y_vehicle_bus_rx_checks, ret);

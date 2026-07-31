@@ -175,6 +175,12 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
     self.safety.set_safety_hooks(CarParams.SafetyModel.tesla, self.SAFETY_PARAM)
     self.safety.init_tests()
 
+  def _enable_auto_speed_limit(self):
+    self.addCleanup(self.safety.set_current_safety_param_sp, 0)
+    self.safety.set_current_safety_param_sp(TeslaSafetyFlagsSP.HAS_VEHICLE_BUS | TeslaSafetyFlagsSP.AUTO_SPEED_LIMIT)
+    self.safety.set_safety_hooks(CarParams.SafetyModel.tesla, self.SAFETY_PARAM)
+    self.safety.init_tests()
+
   def test_turn_signal_validation_requires_flag(self):
     self.assertFalse(self._tx(self._body_control_msg(1, 8, 12)))
 
@@ -206,6 +212,12 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
     self.safety.set_timer(1_500_001)
     self.assertFalse(self._tx(self._body_control_msg(1, 8, 12)))
 
+  def test_turn_signal_validation_rejects_while_controls_allowed(self):
+    self._enable_turn_signal_validation()
+    self.assertTrue(self._rx(self._body_control_msg(0, 0, 11)))
+    self.safety.set_controls_allowed(True)
+    self.assertFalse(self._tx(self._body_control_msg(1, 8, 12)))
+
   def test_speed_button_validation_replays_only_fresh_rx_template(self):
     self._enable_speed_button_validation()
     self.assertFalse(self._tx(self._speed_wheel_msg(1)))
@@ -232,6 +244,19 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
     mutated = self._speed_wheel_msg(1)
     mutated[0].data[4] ^= 1
     self.assertFalse(self._tx(mutated))
+
+  def test_speed_button_validation_rejects_while_controls_allowed(self):
+    self._enable_speed_button_validation()
+    self.assertTrue(self._rx(self._speed_wheel_msg(0)))
+    self.safety.set_controls_allowed(True)
+    self.assertFalse(self._tx(self._speed_wheel_msg(1)))
+
+  def test_auto_speed_limit_requires_controls_allowed(self):
+    self._enable_auto_speed_limit()
+    self.assertTrue(self._rx(self._speed_wheel_msg(0)))
+    self.assertFalse(self._tx(self._speed_wheel_msg(1)))
+    self.safety.set_controls_allowed(True)
+    self.assertTrue(self._tx(self._speed_wheel_msg(1)))
 
   def _accel_msg(self, accel: float):
     # For common.LongitudinalAccelSafetyTest
