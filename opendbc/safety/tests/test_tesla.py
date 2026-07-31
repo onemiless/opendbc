@@ -4,7 +4,7 @@ import unittest
 import numpy as np
 
 from opendbc.car.lateral import get_max_angle_delta_vm, get_max_angle_vm
-from opendbc.car.tesla.teslacan import create_sccm_left_stalk, get_steer_ctrl_type
+from opendbc.car.tesla.teslacan import get_steer_ctrl_type
 from opendbc.car.tesla.values import CANBUS, CarControllerParams, STEER_DISENGAGE_THRESHOLD, TeslaSafetyFlags, TeslaFlags
 from opendbc.car.tesla.carcontroller import get_safety_CP
 from opendbc.car.structs import CarParams
@@ -19,8 +19,10 @@ from opendbc.sunnypilot.car.tesla.values import TeslaSafetyFlagsSP
 MSG_DAS_steeringControl = 0x488
 MSG_APS_eacMonitor = 0x27d
 MSG_DAS_Control = 0x2b9
-MSG_STW_ACTN_RQ = 0x238
-MSG_SCCM_LEFT_STALK = 0x249
+MSG_VCLEFT_SWITCH_STATUS = 0x3C2
+MSG_DAS_BODY_CONTROLS = 0x3E9
+OBSERVED_SPEED_WHEEL_IDLE = bytes.fromhex("010000c000000000")
+OBSERVED_BODY_CONTROLS_IDLE = bytes.fromhex("008802000000b026")
 
 
 def round_angle(apply_angle, can_offset=0):
@@ -36,7 +38,7 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
   RELAY_MALFUNCTION_ADDRS = {0: (MSG_DAS_steeringControl, MSG_APS_eacMonitor)}
   FWD_BLACKLISTED_ADDRS = {2: [MSG_DAS_steeringControl, MSG_APS_eacMonitor]}
   TX_MSGS = [[MSG_DAS_steeringControl, 0], [MSG_APS_eacMonitor, 0], [MSG_DAS_Control, 0],
-             [MSG_STW_ACTN_RQ, CANBUS.vehicle], [MSG_SCCM_LEFT_STALK, CANBUS.vehicle]]
+             [MSG_VCLEFT_SWITCH_STATUS, CANBUS.vehicle], [MSG_DAS_BODY_CONTROLS, CANBUS.vehicle]]
 
   STANDSTILL_THRESHOLD = 0.1
   GAS_PRESSED_THRESHOLD = 3
@@ -146,28 +148,26 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
       values["DAS_controlCounter"] = counter
     return self.packer.make_can_msg_safety("DAS_control", bus, values)
 
-  def _stw_action_msg(self, speed_control_state=0, counter=0, bus=CANBUS.vehicle, values=None):
-    msg_values = {
-      "SpdCtrlLvr_Stat": speed_control_state,
-      "SpdCtrlLvrStat_Inv": 0,
-      "DTR_Dist_Rq": 0,
-      "MC_STW_ACTN_RQ": counter,
-    }
-    if values is not None:
-      msg_values.update(values)
-    return self.packer_adas.make_can_msg_safety("STW_ACTN_RQ", bus, msg_values)
+  @staticmethod
+  def _speed_wheel_msg(right_ticks=0, data=OBSERVED_SPEED_WHEEL_IDLE):
+    payload = bytearray(data)
+    payload[3] = (payload[3] & 0xC0) | (right_ticks & 0x3F)
+    return libsafety_py.make_CANPacket(MSG_VCLEFT_SWITCH_STATUS, CANBUS.vehicle, payload)
 
   @staticmethod
-  def _sccm_left_stalk_msg(turn_state=0, counter=0):
-    msg = create_sccm_left_stalk(turn_state, counter)
-    return libsafety_py.make_CANPacket(msg.address, msg.src, msg.dat)
+  def _body_control_msg(turn_request=0, reason=0, counter=11, data=OBSERVED_BODY_CONTROLS_IDLE):
+    payload = bytearray(data)
+    payload[1] = (payload[1] & 0xFC) | turn_request
+    payload[2] = (payload[2] & 0xE1) | ((reason & 0xF) << 1)
+    payload[6] = (payload[6] & 0x0F) | ((counter & 0xF) << 4)
+    payload[7] = (0xE9 + 0x03 + sum(payload[:7])) & 0xFF
+    return libsafety_py.make_CANPacket(MSG_DAS_BODY_CONTROLS, CANBUS.vehicle, payload)
 
   def _enable_turn_signal_validation(self):
     self.addCleanup(self.safety.set_current_safety_param_sp, 0)
-    self.safety.set_current_safety_param_sp(TeslaSafetyFlagsSP.TURN_SIGNAL_VALIDATION)
+    self.safety.set_current_safety_param_sp(TeslaSafetyFlagsSP.HAS_VEHICLE_BUS | TeslaSafetyFlagsSP.TURN_SIGNAL_VALIDATION)
     self.safety.set_safety_hooks(CarParams.SafetyModel.tesla, self.SAFETY_PARAM)
     self.safety.init_tests()
-    self._rx(self._vehicle_moving_msg(0))
 
   def _enable_speed_button_validation(self):
     self.addCleanup(self.safety.set_current_safety_param_sp, 0)
@@ -175,106 +175,63 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
     self.safety.set_safety_hooks(CarParams.SafetyModel.tesla, self.SAFETY_PARAM)
     self.safety.init_tests()
 
-  def _observed_stw_action_msg(self, speed_control_state=48, counter=0, distance=45):
-    return self._stw_action_msg(speed_control_state, counter, values={
-      "SpdCtrlLvrStat_Inv": 1,
-      "DTR_Dist_Rq": distance,
-      "HiBmLvr_Stat": 3,
-      "WprWashSw_Psd": 1,
-      "WprWash_R_Sw_Posn_V2": 2,
-      "StW_Cond_Flt": 1,
-      "StW_Cond_Psd": 1,
-      "HrnSw_Psd": 3,
-      "StW_Sw00_Psd": 1,
-      "StW_Sw01_Psd": 1,
-      "StW_Sw02_Psd": 1,
-      "StW_Sw03_Psd": 1,
-      "StW_Sw04_Psd": 1,
-      "WprSw6Posn": 6,
-    })
-
   def test_turn_signal_validation_requires_flag(self):
-    self.assertFalse(self._tx(self._sccm_left_stalk_msg(2, 0)))
+    self.assertFalse(self._tx(self._body_control_msg(1, 8, 12)))
 
-  def test_turn_signal_validation_frames(self):
+  def test_turn_signal_validation_replays_only_fresh_rx_template(self):
     self._enable_turn_signal_validation()
-    for counter, turn_state in ((0, 0), (1, 2), (2, 0), (3, 6), (4, 0)):
-      with self.subTest(counter=counter, turn_state=turn_state):
-        self.assertTrue(self._tx(self._sccm_left_stalk_msg(turn_state, counter)))
+    self.assertFalse(self._tx(self._body_control_msg(1, 8, 12)))
+    self.assertTrue(self._rx(self._body_control_msg(0, 0, 11)))
+    self.assertTrue(self._tx(self._body_control_msg(1, 8, 12)))
+    self.assertFalse(self._tx(self._body_control_msg(2, 8, 12)))
 
-    for turn_state in (1, 3, 4, 5, 7, 8, 9):
-      msg = self._sccm_left_stalk_msg(0, 5)
-      msg.data[2] = turn_state
-      with self.subTest(turn_state=turn_state):
-        self.assertFalse(self._tx(msg))
+    self.assertTrue(self._rx(self._body_control_msg(0, 0, 12)))
+    self.assertTrue(self._tx(self._body_control_msg(3, 4, 13)))
 
-    bad_crc = self._sccm_left_stalk_msg(2, 6)
-    bad_crc.data[0] ^= 0xFF
-    self.assertFalse(self._tx(bad_crc))
-
-  def test_turn_signal_validation_requires_disengaged_controls(self):
+  def test_turn_signal_validation_rejects_mutated_fields_and_bad_checksum(self):
     self._enable_turn_signal_validation()
-    self.safety.set_controls_allowed(True)
-    self.assertFalse(self._tx(self._sccm_left_stalk_msg(2, 0)))
+    self.assertTrue(self._rx(self._body_control_msg(0, 0, 11)))
+    mutated = self._body_control_msg(1, 8, 12)
+    mutated[0].data[4] ^= 1
+    mutated[0].data[7] = (0xE9 + 0x03 + sum(mutated[0].data[i] for i in range(7))) & 0xFF
+    self.assertFalse(self._tx(mutated))
 
-    self.safety.set_controls_allowed(False)
-    self.safety.set_controls_allowed_lateral(True)
-    self.assertFalse(self._tx(self._sccm_left_stalk_msg(2, 1)))
-
-  def test_turn_signal_validation_does_not_require_park_or_standstill(self):
-    self._enable_turn_signal_validation()
-    self._rx(self._user_brake_msg(False))
-    self.assertTrue(self._tx(self._sccm_left_stalk_msg(2, 0)))
-    self.assertTrue(self._tx(self._sccm_left_stalk_msg(0, 1)))
-    self._rx(self._vehicle_moving_msg(20))
-    self.assertTrue(self._tx(self._sccm_left_stalk_msg(6, 2)))
-
-  def test_turn_signal_validation_limits_active_pulse(self):
-    self._enable_turn_signal_validation()
-    for counter in range(5):
-      self.assertTrue(self._tx(self._sccm_left_stalk_msg(2, counter)))
-    self.assertFalse(self._tx(self._sccm_left_stalk_msg(2, 5)))
-    self.assertTrue(self._tx(self._sccm_left_stalk_msg(0, 6)))
-    self.assertTrue(self._tx(self._sccm_left_stalk_msg(6, 7)))
-
-  def test_stw_action_request_rejects_legacy_zero_template(self):
-    for speed_control_state in (0, 16, 32):
-      with self.subTest(speed_control_state=speed_control_state):
-        self.assertFalse(self._tx(self._stw_action_msg(speed_control_state=speed_control_state)))
-
-  def test_speed_button_validation_replays_only_fresh_rx_template(self):
-    self._enable_speed_button_validation()
-    self.assertFalse(self._tx(self._observed_stw_action_msg(32, 2)))
-
-    self.assertTrue(self._rx(self._observed_stw_action_msg(48, 1)))
-    self.assertTrue(self._tx(self._observed_stw_action_msg(32, 2)))
-    self.assertTrue(self._tx(self._observed_stw_action_msg(48, 3)))
-    self.assertTrue(self._tx(self._observed_stw_action_msg(16, 4)))
-
-    self.assertFalse(self._tx(self._observed_stw_action_msg(32, 5, distance=33)))
-    bad_checksum = self._observed_stw_action_msg(32, 5)
+    bad_checksum = self._body_control_msg(1, 8, 12)
     bad_checksum[0].data[7] ^= 0xFF
     self.assertFalse(self._tx(bad_checksum))
 
+  def test_turn_signal_validation_rejects_stale_template(self):
+    self._enable_turn_signal_validation()
+    self.assertTrue(self._rx(self._body_control_msg(0, 0, 11)))
     self.safety.set_timer(1_500_001)
-    self.assertFalse(self._tx(self._observed_stw_action_msg(32, 5)))
+    self.assertFalse(self._tx(self._body_control_msg(1, 8, 12)))
+
+  def test_speed_button_validation_replays_only_fresh_rx_template(self):
+    self._enable_speed_button_validation()
+    self.assertFalse(self._tx(self._speed_wheel_msg(1)))
+    self.assertTrue(self._rx(self._speed_wheel_msg(0)))
+    self.assertTrue(self._tx(self._speed_wheel_msg(1)))
+    self.assertFalse(self._tx(self._speed_wheel_msg(-1)))
+    self.safety.set_timer(250_001)
+    self.assertTrue(self._rx(self._speed_wheel_msg(0)))
+    self.assertTrue(self._tx(self._speed_wheel_msg(-1)))
+    self.safety.set_timer(1_750_002)
+    self.assertFalse(self._tx(self._speed_wheel_msg(1)))
 
   def test_speed_button_validation_requires_vehicle_bus_flag(self):
     self.addCleanup(self.safety.set_current_safety_param_sp, 0)
     self.safety.set_current_safety_param_sp(TeslaSafetyFlagsSP.SPEED_BUTTON_VALIDATION)
     self.safety.set_safety_hooks(CarParams.SafetyModel.tesla, self.SAFETY_PARAM)
     self.safety.init_tests()
-    self.assertTrue(self._rx(self._observed_stw_action_msg(48, 1)))
-    self.assertFalse(self._tx(self._observed_stw_action_msg(32, 2)))
+    self.assertTrue(self._rx(self._speed_wheel_msg(0)))
+    self.assertFalse(self._tx(self._speed_wheel_msg(1)))
 
-  def test_speed_button_validation_limits_active_pulse(self):
+  def test_speed_button_validation_rejects_other_field_changes(self):
     self._enable_speed_button_validation()
-    self.assertTrue(self._rx(self._observed_stw_action_msg(48, 1)))
-    self.assertTrue(self._tx(self._observed_stw_action_msg(32, 2)))
-    self.assertTrue(self._tx(self._observed_stw_action_msg(32, 3)))
-    self.assertFalse(self._tx(self._observed_stw_action_msg(32, 4)))
-    self.assertTrue(self._tx(self._observed_stw_action_msg(48, 5)))
-    self.assertTrue(self._tx(self._observed_stw_action_msg(16, 6)))
+    self.assertTrue(self._rx(self._speed_wheel_msg(0)))
+    mutated = self._speed_wheel_msg(1)
+    mutated[0].data[4] ^= 1
+    self.assertFalse(self._tx(mutated))
 
   def _accel_msg(self, accel: float):
     # For common.LongitudinalAccelSafetyTest
