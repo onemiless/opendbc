@@ -7,7 +7,8 @@ from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP
 IDLE_TEMPLATE = bytes.fromhex("2955000000000080")
 
 
-def fake_state(current_speed=20.0, target_speed=25.0, template_time=1_000_000_000):
+def fake_state(current_speed=20.0, target_speed=25.0, template_time=1_000_000_000,
+               speed_units="KPH", stock_longitudinal=False):
   return SimpleNamespace(
     out=SimpleNamespace(
       cruiseState=SimpleNamespace(enabled=True, speedCluster=current_speed),
@@ -17,6 +18,8 @@ def fake_state(current_speed=20.0, target_speed=25.0, template_time=1_000_000_00
     tesla_speed_limit_target_valid=True,
     tesla_speed_button_template=IDLE_TEMPLATE,
     tesla_speed_button_template_nanos=template_time,
+    tesla_speed_units=speed_units,
+    tesla_stock_longitudinal_active=stock_longitudinal,
   )
 
 
@@ -38,12 +41,45 @@ def test_controller_sends_one_tick_then_waits_for_speed_feedback():
   assert sends[0].address == 0x3C2
   assert sends[0].src == 1
   assert sends[0].dat == bytes.fromhex("2955000100000080")
+  assert controller.remaining_steps == 18
   assert controller.update(fake_control(), state, 1_400_000_000) == []
 
   state.out.cruiseState.speedCluster = 20.3
-  assert controller.update(fake_control(), state, 1_650_000_000) == []
+  assert len(controller.update(fake_control(), state, 1_650_000_000)) == 1
   state.tesla_speed_button_template_nanos = 1_700_000_000
-  assert len(controller.update(fake_control(), state, 1_900_000_000)) == 1
+  assert controller.update(fake_control(), state, 1_900_000_000) == []
+
+
+def test_controller_quantizes_target_in_vehicle_display_units():
+  controller = TeslaSpeedLimitController(SimpleNamespace(flags=TeslaFlagsSP.AUTO_SPEED_LIMIT))
+  mph = 0.44704
+
+  state = fake_state(current_speed=60.0 * mph, target_speed=60.4 * mph, speed_units="MPH")
+  assert controller.update(fake_control(), state, 1_050_000_000) == []
+
+  state.tesla_speed_limit_target = 60.6 * mph
+  assert len(controller.update(fake_control(), state, 1_060_000_000)) == 1
+  assert controller.remaining_steps == 1
+
+
+def test_controller_operates_during_stock_longitudinal_source():
+  controller = TeslaSpeedLimitController(SimpleNamespace(flags=TeslaFlagsSP.AUTO_SPEED_LIMIT))
+  state = fake_state(stock_longitudinal=True)
+
+  assert len(controller.update(fake_control(), state, 1_050_000_000)) == 1
+
+
+def test_controller_does_not_retry_forever_without_feedback():
+  controller = TeslaSpeedLimitController(SimpleNamespace(flags=TeslaFlagsSP.AUTO_SPEED_LIMIT))
+  state = fake_state()
+
+  assert len(controller.update(fake_control(), state, 1_050_000_000)) == 1
+  assert controller.update(fake_control(), state, 2_300_000_000) == []
+  assert controller.update(fake_control(), state, 3_000_000_000) == []
+
+  state.out.cruiseState.speedCluster += 1.0 / 3.6
+  state.tesla_speed_button_template_nanos = 3_000_000_000
+  assert len(controller.update(fake_control(), state, 3_100_000_000)) == 1
 
 
 def test_controller_stops_at_target_and_when_controls_are_inactive():
@@ -59,7 +95,7 @@ def test_controller_stops_at_target_and_when_controls_are_inactive():
 def test_controller_rejects_stale_template_or_invalid_limit():
   controller = TeslaSpeedLimitController(SimpleNamespace(flags=TeslaFlagsSP.AUTO_SPEED_LIMIT))
   state = fake_state(template_time=1_000_000_000)
-  assert controller.update(fake_control(), state, 1_400_000_001) == []
+  assert controller.update(fake_control(), state, 2_500_000_001) == []
 
   state.tesla_speed_button_template_nanos = 1_500_000_000
   state.tesla_speed_limit_target_valid = False

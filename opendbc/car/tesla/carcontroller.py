@@ -53,6 +53,9 @@ class CarController(CarControllerBase):
         "carcontroller", "auto_speed_limit_tick", frame=self.frame,
         target_speed=float(CS.tesla_speed_limit_target),
         current_set_speed=float(CS.out.cruiseState.speedCluster),
+        target_display_speed=self.speed_limit_controller.target_display,
+        current_display_speed=self.speed_limit_controller.current_display,
+        remaining_steps=self.speed_limit_controller.remaining_steps,
         data=speed_limit_sends[0].dat.hex(),
       )
 

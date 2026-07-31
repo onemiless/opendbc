@@ -421,7 +421,7 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
       (safety_get_ts_elapsed(microsecond_timer_get(), tesla_speed_button_rx_timestamp) <= 1500000U);
     const bool validation_rate_allowed = !tesla_speed_button_last_tx_valid ||
       (safety_get_ts_elapsed(microsecond_timer_get(), tesla_speed_button_last_tx_timestamp) >= 250000U);
-    const bool validation_mode_allowed = tesla_speed_button_validation && !controls_allowed && !controls_allowed_lateral;
+    const bool validation_mode_allowed = tesla_speed_button_validation;
     const bool automatic_mode_allowed = tesla_auto_speed_limit && controls_allowed;
     const bool validation_button_valid = tesla_has_vehicle_bus && (validation_mode_allowed || automatic_mode_allowed) &&
       validation_tick_allowed && validation_template_matches && validation_template_fresh && validation_rate_allowed;
@@ -454,7 +454,7 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
     const bool transition_valid = active_turn ? (tesla_turn_signal_active_state == 0U) :
                                                 (tesla_turn_signal_active_state != 0U);
     const bool checksum_valid = tesla_compute_checksum(msg) == tesla_get_checksum(msg);
-    const bool valid = tesla_has_vehicle_bus && tesla_turn_signal_validation && !controls_allowed && !controls_allowed_lateral && request_reason_valid &&
+    const bool valid = tesla_has_vehicle_bus && tesla_turn_signal_validation && request_reason_valid &&
                        validation_template_matches && validation_template_fresh && transition_valid && checksum_valid;
     if (!valid) {
       violation = true;

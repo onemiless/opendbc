@@ -70,6 +70,7 @@ class CarStateExt:
     self.tesla_speed_button_template_nanos = 0
     self.tesla_speed_limit_target = 0.0
     self.tesla_speed_limit_target_valid = False
+    self.tesla_speed_units = "KPH"
 
   def update_speed_button_template(self, data: bytes, monotonic_nanos: int) -> None:
     if len(data) == 8 and (data[0] & 0x03) == 1 and (data[3] & 0x3F) == 0:
