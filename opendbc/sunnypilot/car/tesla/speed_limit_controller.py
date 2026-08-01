@@ -8,6 +8,7 @@ VEHICLE_BUS = 1
 TEMPLATE_MAX_AGE_NS = 1_500_000_000
 MIN_TX_INTERVAL_NS = 500_000_000
 FEEDBACK_TIMEOUT_NS = 1_200_000_000
+TARGET_STABLE_NS = 500_000_000
 KPH_TO_MS = 1.0 / 3.6
 MPH_TO_MS = 0.44704
 
@@ -39,6 +40,8 @@ class TeslaSpeedLimitController:
     self.resume_gesture_counter_seen = None
     self.manual_override_active = False
     self.last_current_display = None
+    self.target_change_nanos = 0
+    self.target_stabilizing = False
 
   def _reset_pending(self) -> None:
     self.pending_since_nanos = 0
@@ -96,9 +99,12 @@ class TeslaSpeedLimitController:
 
     target_changed = target_display != self.planned_target_display
     if target_changed:
+      previous_target_display = self.planned_target_display
       self._reset_pending()
       self.feedback_blocked_signature = None
       self.planned_target_display = target_display
+      self.target_change_nanos = now_nanos
+      self.target_stabilizing = previous_target_display > 0
       self._clear_manual_override("speed_limit_changed")
 
     if resume_changed:
@@ -122,6 +128,12 @@ class TeslaSpeedLimitController:
     if self.manual_override_active:
       self.remaining_steps = 0
       return []
+
+    if self.target_stabilizing:
+      if now_nanos - self.target_change_nanos < TARGET_STABLE_NS:
+        self.remaining_steps = target_display - current_display
+        return []
+      self.target_stabilizing = False
 
     if self.pending_direction:
       feedback_delta = current_display - self.pending_speed_display

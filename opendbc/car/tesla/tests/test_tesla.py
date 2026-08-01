@@ -898,6 +898,17 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
     self.assertLess(accel, 1.2)
     self.assertLess(controller.sp_takeover_ramp_frames, 100)
 
+  def test_sp_takeover_starts_from_measured_vehicle_acceleration(self):
+    state = SimpleNamespace(
+      out=SimpleNamespace(aEgo=-2.31),
+      das_control={"DAS_accelMin": -2.24, "DAS_accelMax": 1.52},
+    )
+
+    self.assertAlmostEqual(-2.31, CarController._stock_takeover_accel(state))
+
+    state.out.aEgo = float("nan")
+    self.assertAlmostEqual(-0.36, CarController._stock_takeover_accel(state))
+
   def test_sp_takeover_ramp_ignores_stale_pre_stock_command_time(self):
     controller = CarController.__new__(CarController)
     controller.frame = 1000

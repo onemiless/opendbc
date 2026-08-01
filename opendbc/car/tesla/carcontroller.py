@@ -100,7 +100,7 @@ class CarController(CarControllerBase):
         self.sp_takeover_ramp_frames = 0
       elif leaving_stock:
         self.leaving_stock_pending = True
-        self.sp_takeover_accel = self._stock_accel_midpoint(CS)
+        self.sp_takeover_accel = self._stock_takeover_accel(CS)
         self.sp_takeover_ramp_frames = SP_TAKEOVER_RAMP_FRAMES
         self.dynamic_acc_debug_followup_frames = 100
         self._log_longitudinal_transition("leaving_stock", CC, CS)
@@ -166,6 +166,16 @@ class CarController(CarControllerBase):
     das = CS.das_control
     return float(np.clip((float(das["DAS_accelMin"]) + float(das["DAS_accelMax"])) / 2.0,
                          CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
+
+  @staticmethod
+  def _stock_takeover_accel(CS):
+    # The OEM min/max values are an allowed envelope, not the acceleration
+    # currently applied to the vehicle. Start at measured acceleration so the
+    # source edge does not briefly release or add braking.
+    measured_accel = float(CS.out.aEgo)
+    if not np.isfinite(measured_accel):
+      return CarController._stock_accel_midpoint(CS)
+    return float(np.clip(measured_accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
 
   def _limited_sp_takeover_accel(self, long_active, requested_accel):
     requested_accel = float(np.clip(requested_accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
