@@ -7,6 +7,9 @@ import time
 DYNAMIC_ACC_DEBUG_PATH = "/data/dynamic_acc_debug.log"
 _MAX_LOG_BYTES = 2 * 1024 * 1024
 _LOG_LOCK = threading.Lock()
+# Release/dev branches keep the recorder available for future diagnosis, but do
+# not write the high-frequency control trace unless this is explicitly enabled.
+DYNAMIC_ACC_DEBUG_LOGGING_ENABLED = False
 
 
 def _append_dynamic_acc_debug(record: dict) -> None:
@@ -21,6 +24,9 @@ def _append_dynamic_acc_debug(record: dict) -> None:
 
 
 def log_dynamic_acc(source: str, event: str, *, sync: bool = False, **values) -> None:
+  if not DYNAMIC_ACC_DEBUG_LOGGING_ENABLED:
+    return
+
   record = {
     "wall_time": time.time(),
     "monotonic_ns": time.monotonic_ns(),
