@@ -57,6 +57,9 @@ class TeslaSpeedLimitController:
     self.remaining_steps = 0
     self.feedback_blocked_signature = None
     self.last_current_display = None
+    self.planned_target_display = 0
+    self.target_change_nanos = 0
+    self.target_stabilizing = False
     if clear_manual_override:
       self._clear_manual_override("cruise_disengaged")
 
@@ -99,12 +102,14 @@ class TeslaSpeedLimitController:
 
     target_changed = target_display != self.planned_target_display
     if target_changed:
-      previous_target_display = self.planned_target_display
       self._reset_pending()
       self.feedback_blocked_signature = None
       self.planned_target_display = target_display
       self.target_change_nanos = now_nanos
-      self.target_stabilizing = previous_target_display > 0
+      # Wait for the complete resolver update before pressing the wheel. This
+      # also covers the first valid target after engagement, where an
+      # intermediate offset target must never produce a wrong-direction tick.
+      self.target_stabilizing = True
       self._clear_manual_override("speed_limit_changed")
 
     if resume_changed:
@@ -118,7 +123,7 @@ class TeslaSpeedLimitController:
 
     external_speed_change = (self.last_current_display is not None and current_display != self.last_current_display and
                              not self.pending_direction and self.feedback_blocked_signature is None and
-                             not target_changed and not manual_changed and not resume_changed)
+                             not self.target_stabilizing and not target_changed and not manual_changed and not resume_changed)
     self.last_current_display = current_display
     if external_speed_change and not self.manual_override_active:
       self.manual_override_active = True
