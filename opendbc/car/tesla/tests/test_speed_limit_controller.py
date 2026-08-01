@@ -20,6 +20,8 @@ def fake_state(current_speed=20.0, target_speed=25.0, template_time=1_000_000_00
     tesla_speed_button_template_nanos=template_time,
     tesla_speed_units=speed_units,
     tesla_stock_longitudinal_active=stock_longitudinal,
+    tesla_manual_speed_adjustment_counter=0,
+    tesla_speed_auto_resume_gesture_counter=0,
   )
 
 
@@ -80,6 +82,58 @@ def test_controller_does_not_retry_forever_without_feedback():
   state.out.cruiseState.speedCluster += 1.0 / 3.6
   state.tesla_speed_button_template_nanos = 3_000_000_000
   assert len(controller.update(fake_control(), state, 3_100_000_000)) == 1
+
+
+def test_manual_adjustment_pauses_until_up_down_resume_gesture():
+  controller = TeslaSpeedLimitController(SimpleNamespace(flags=TeslaFlagsSP.AUTO_SPEED_LIMIT))
+  state = fake_state(current_speed=25.0, target_speed=25.0)
+  assert controller.update(fake_control(), state, 1_050_000_000) == []
+
+  state.out.cruiseState.speedCluster = 26.0
+  state.tesla_manual_speed_adjustment_counter = 1
+  assert controller.update(fake_control(), state, 1_100_000_000) == []
+  assert controller.manual_override_active
+
+  state.tesla_manual_speed_adjustment_counter = 2
+  state.tesla_speed_auto_resume_gesture_counter = 1
+  state.tesla_speed_button_template_nanos = 1_150_000_000
+  assert len(controller.update(fake_control(), state, 1_150_000_000)) == 1
+  assert not controller.manual_override_active
+
+
+def test_manual_override_clears_when_speed_limit_changes():
+  controller = TeslaSpeedLimitController(SimpleNamespace(flags=TeslaFlagsSP.AUTO_SPEED_LIMIT))
+  state = fake_state(current_speed=25.0, target_speed=25.0)
+  assert controller.update(fake_control(), state, 1_050_000_000) == []
+
+  state.out.cruiseState.speedCluster = 26.0
+  state.tesla_manual_speed_adjustment_counter = 1
+  assert controller.update(fake_control(), state, 1_100_000_000) == []
+  assert controller.manual_override_active
+
+  state.tesla_speed_limit_target = 27.0
+  state.tesla_speed_button_template_nanos = 1_150_000_000
+  assert len(controller.update(fake_control(), state, 1_150_000_000)) == 1
+  assert not controller.manual_override_active
+
+
+def test_manual_override_clears_after_cruise_disengages():
+  controller = TeslaSpeedLimitController(SimpleNamespace(flags=TeslaFlagsSP.AUTO_SPEED_LIMIT))
+  state = fake_state(current_speed=25.0, target_speed=25.0)
+  assert controller.update(fake_control(), state, 1_050_000_000) == []
+
+  state.out.cruiseState.speedCluster = 26.0
+  state.tesla_manual_speed_adjustment_counter = 1
+  assert controller.update(fake_control(), state, 1_100_000_000) == []
+  assert controller.manual_override_active
+
+  state.out.cruiseState.enabled = False
+  assert controller.update(fake_control(enabled=False), state, 1_150_000_000) == []
+  assert not controller.manual_override_active
+
+  state.out.cruiseState.enabled = True
+  state.tesla_speed_button_template_nanos = 1_200_000_000
+  assert len(controller.update(fake_control(), state, 1_200_000_000)) == 1
 
 
 def test_controller_stops_at_target_and_when_controls_are_inactive():

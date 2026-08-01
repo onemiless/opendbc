@@ -250,6 +250,28 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
     self.assertFalse(cp_sp.flags & TeslaFlagsSP.AUTO_SPEED_LIMIT)
     self.assertFalse(cp_sp.safetyParam & TeslaSafetyFlagsSP.AUTO_SPEED_LIMIT)
 
+  def test_speed_wheel_up_down_gesture_requests_auto_speed_resume(self):
+    state = SimpleNamespace(
+      tesla_speed_button_template=None,
+      tesla_speed_button_template_nanos=0,
+      tesla_manual_speed_adjustment_counter=0,
+      tesla_speed_auto_resume_gesture_counter=0,
+      _tesla_speed_resume_up_nanos=0,
+    )
+    idle = bytes.fromhex("2955000000000080")
+    up = bytes.fromhex("2955000100000080")
+    down = bytes.fromhex("2955003f00000080")
+
+    CarStateExt.update_speed_button_template(state, idle, 1_000_000_000)
+    CarStateExt.update_speed_button_template(state, up, 1_100_000_000)
+    CarStateExt.update_speed_button_template(state, down, 2_500_000_000)
+    self.assertEqual(state.tesla_manual_speed_adjustment_counter, 2)
+    self.assertEqual(state.tesla_speed_auto_resume_gesture_counter, 1)
+
+    CarStateExt.update_speed_button_template(state, up, 3_000_000_000)
+    CarStateExt.update_speed_button_template(state, down, 4_500_000_001)
+    self.assertEqual(state.tesla_speed_auto_resume_gesture_counter, 1)
+
   def test_ap_hybrid_initialization_requires_openpilot_longitudinal(self):
     cp = SimpleNamespace(brand="tesla", openpilotLongitudinalControl=False)
     cp_sp = SimpleNamespace(flags=0, safetyParam=0)

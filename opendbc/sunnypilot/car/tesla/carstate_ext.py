@@ -38,6 +38,7 @@ BLINKER_STALE_S = 0.4
 PLAN_STALE_S = 0.2
 LANE_CHANGE_STALE_S = 0.2
 LATERAL_STABLE_S = 1.0
+SPEED_AUTO_RESUME_GESTURE_NS = 1_500_000_000
 
 
 class TeslaLongitudinalSource(StrEnum):
@@ -71,11 +72,29 @@ class CarStateExt:
     self.tesla_speed_limit_target = 0.0
     self.tesla_speed_limit_target_valid = False
     self.tesla_speed_units = "KPH"
+    self.tesla_manual_speed_adjustment_counter = 0
+    self.tesla_speed_auto_resume_gesture_counter = 0
+    self._tesla_speed_resume_up_nanos = 0
 
   def update_speed_button_template(self, data: bytes, monotonic_nanos: int) -> None:
-    if len(data) == 8 and (data[0] & 0x03) == 1 and (data[3] & 0x3F) == 0:
+    if len(data) != 8 or (data[0] & 0x03) != 1:
+      return
+
+    raw_tick = data[3] & 0x3F
+    if raw_tick == 0:
       self.tesla_speed_button_template = bytes(data)
       self.tesla_speed_button_template_nanos = int(monotonic_nanos)
+      return
+
+    signed_tick = raw_tick - 0x40 if raw_tick & 0x20 else raw_tick
+    direction = 1 if signed_tick > 0 else -1
+    self.tesla_manual_speed_adjustment_counter += 1
+    if direction > 0:
+      self._tesla_speed_resume_up_nanos = int(monotonic_nanos)
+    elif (self._tesla_speed_resume_up_nanos and
+          int(monotonic_nanos) - self._tesla_speed_resume_up_nanos <= SPEED_AUTO_RESUME_GESTURE_NS):
+      self.tesla_speed_auto_resume_gesture_counter += 1
+      self._tesla_speed_resume_up_nanos = 0
 
   def update_speed_limit_target(self, target: float, valid: bool) -> None:
     self.tesla_speed_limit_target = float(target) if valid else 0.0
