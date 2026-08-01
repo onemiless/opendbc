@@ -75,6 +75,7 @@ class CarStateExt:
     self.tesla_manual_speed_adjustment_counter = 0
     self.tesla_speed_auto_resume_gesture_counter = 0
     self._tesla_speed_resume_up_nanos = 0
+    self._tesla_speed_resume_down_nanos = 0
 
   def update_speed_button_template(self, data: bytes, monotonic_nanos: int) -> None:
     if len(data) != 8 or (data[0] & 0x03) != 1:
@@ -89,11 +90,17 @@ class CarStateExt:
     signed_tick = raw_tick - 0x40 if raw_tick & 0x20 else raw_tick
     direction = 1 if signed_tick > 0 else -1
     self.tesla_manual_speed_adjustment_counter += 1
-    if direction > 0:
-      self._tesla_speed_resume_up_nanos = int(monotonic_nanos)
-    elif (self._tesla_speed_resume_up_nanos and
-          int(monotonic_nanos) - self._tesla_speed_resume_up_nanos <= SPEED_AUTO_RESUME_GESTURE_NS):
+    now_nanos = int(monotonic_nanos)
+    opposite_nanos = self._tesla_speed_resume_down_nanos if direction > 0 else self._tesla_speed_resume_up_nanos
+    if opposite_nanos and now_nanos - opposite_nanos <= SPEED_AUTO_RESUME_GESTURE_NS:
       self.tesla_speed_auto_resume_gesture_counter += 1
+      self._tesla_speed_resume_up_nanos = 0
+      self._tesla_speed_resume_down_nanos = 0
+    elif direction > 0:
+      self._tesla_speed_resume_up_nanos = now_nanos
+      self._tesla_speed_resume_down_nanos = 0
+    else:
+      self._tesla_speed_resume_down_nanos = now_nanos
       self._tesla_speed_resume_up_nanos = 0
 
   def update_speed_limit_target(self, target: float, valid: bool) -> None:

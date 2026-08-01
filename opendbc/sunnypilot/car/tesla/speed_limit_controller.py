@@ -113,7 +113,7 @@ class TeslaSpeedLimitController:
       self._clear_manual_override("speed_limit_changed")
 
     if resume_changed:
-      self._clear_manual_override("wheel_up_down_gesture")
+      self._clear_manual_override("wheel_opposite_direction_gesture")
     elif manual_changed:
       if not self.manual_override_active:
         log_dynamic_acc("speed_limit_controller", "manual_speed_override", current_display=current_display,
