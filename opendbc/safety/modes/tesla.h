@@ -20,6 +20,8 @@
   {.msg = {{0x3C2, 1, 8, 2U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true, .ignore_frequency_check = true}, { 0 }, { 0 }}},   /* VCLEFT_switchStatus */ \
 
 #define TESLA_STEERING_DISENGAGE_TORQUE 500 // cNm
+#define TESLA_TURN_SIGNAL_SESSION_TIMEOUT_US 12000000U
+#define TESLA_TURN_SIGNAL_SESSION_MAX_FRAMES 64U
 
 static bool tesla_longitudinal = false;
 static bool tesla_fsd_14 = false;
@@ -58,6 +60,8 @@ static bool tesla_speed_button_validation = false;
 static bool tesla_auto_speed_limit = false;
 static uint8_t tesla_turn_signal_active_state = 0U;
 static uint8_t tesla_turn_signal_active_count = 0U;
+static uint32_t tesla_turn_signal_session_timestamp = 0U;
+static bool tesla_turn_signal_session_timed_out = false;
 static bool tesla_turn_signal_rx_template_valid = false;
 static uint8_t tesla_turn_signal_rx_template[8] = {0U};
 static uint32_t tesla_turn_signal_rx_timestamp = 0U;
@@ -436,6 +440,7 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
 
   // DAS body-control turn request cloned from a fresh OEM idle frame.
   if (msg->addr == 0x3E9U) {
+    const uint32_t now = microsecond_timer_get();
     const uint8_t turn_request = msg->data[1] & 0x03U;
     const uint8_t turn_reason = (msg->data[2] >> 1) & 0x0FU;
     const bool active_turn = (turn_request == 1U) || (turn_request == 2U);
@@ -451,22 +456,32 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
     const uint8_t expected_counter = ((tesla_turn_signal_rx_template[6] >> 4) + 1U) & 0x0FU;
     validation_template_matches &= (msg->data[6] >> 4) == expected_counter;
     const bool validation_template_fresh = tesla_turn_signal_rx_template_valid &&
-      (safety_get_ts_elapsed(microsecond_timer_get(), tesla_turn_signal_rx_timestamp) <= 1500000U);
+      (safety_get_ts_elapsed(now, tesla_turn_signal_rx_timestamp) <= 1500000U);
+    if ((tesla_turn_signal_active_state != 0U) &&
+        (safety_get_ts_elapsed(now, tesla_turn_signal_session_timestamp) > TESLA_TURN_SIGNAL_SESSION_TIMEOUT_US)) {
+      tesla_turn_signal_session_timed_out = true;
+    }
     const bool transition_valid = active_turn ?
-      (((tesla_turn_signal_active_state == 0U) && (tesla_turn_signal_active_count == 0U)) ||
-       ((tesla_turn_signal_active_state == turn_request) && (tesla_turn_signal_active_count < 5U))) :
-      ((tesla_turn_signal_active_state != 0U) && (tesla_turn_signal_active_count > 0U));
+      (((tesla_turn_signal_active_state == 0U) && !tesla_turn_signal_session_timed_out) ||
+       ((tesla_turn_signal_active_state == turn_request) && !tesla_turn_signal_session_timed_out &&
+        (tesla_turn_signal_active_count < TESLA_TURN_SIGNAL_SESSION_MAX_FRAMES))) :
+      (tesla_turn_signal_active_state != 0U);
     const bool checksum_valid = tesla_compute_checksum(msg) == tesla_get_checksum(msg);
     const bool valid = tesla_has_vehicle_bus && tesla_turn_signal_validation && request_reason_valid &&
                        validation_template_matches && validation_template_fresh && transition_valid && checksum_valid;
     if (!valid) {
       violation = true;
     } else if (active_turn) {
+      if (tesla_turn_signal_active_state == 0U) {
+        tesla_turn_signal_session_timestamp = now;
+      }
       tesla_turn_signal_active_state = turn_request;
       tesla_turn_signal_active_count++;
     } else {
       tesla_turn_signal_active_state = 0U;
       tesla_turn_signal_active_count = 0U;
+      tesla_turn_signal_session_timestamp = 0U;
+      tesla_turn_signal_session_timed_out = false;
     }
     // Every validation TX consumes exactly one OEM template. A subsequent
     // action or cancel must wait for another real vehicle frame.
@@ -608,6 +623,8 @@ static safety_config tesla_init(uint16_t param) {
   tesla_ap_stock_lateral_active = false;
   tesla_turn_signal_active_state = 0U;
   tesla_turn_signal_active_count = 0U;
+  tesla_turn_signal_session_timestamp = 0U;
+  tesla_turn_signal_session_timed_out = false;
   tesla_turn_signal_rx_template_valid = false;
   tesla_turn_signal_rx_timestamp = 0U;
   tesla_speed_button_rx_template_valid = false;
