@@ -57,6 +57,7 @@ static bool tesla_turn_signal_validation = false;
 static bool tesla_speed_button_validation = false;
 static bool tesla_auto_speed_limit = false;
 static uint8_t tesla_turn_signal_active_state = 0U;
+static uint8_t tesla_turn_signal_active_count = 0U;
 static bool tesla_turn_signal_rx_template_valid = false;
 static uint8_t tesla_turn_signal_rx_template[8] = {0U};
 static uint32_t tesla_turn_signal_rx_timestamp = 0U;
@@ -451,8 +452,10 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
     validation_template_matches &= (msg->data[6] >> 4) == expected_counter;
     const bool validation_template_fresh = tesla_turn_signal_rx_template_valid &&
       (safety_get_ts_elapsed(microsecond_timer_get(), tesla_turn_signal_rx_timestamp) <= 1500000U);
-    const bool transition_valid = active_turn ? (tesla_turn_signal_active_state == 0U) :
-                                                (tesla_turn_signal_active_state != 0U);
+    const bool transition_valid = active_turn ?
+      (((tesla_turn_signal_active_state == 0U) && (tesla_turn_signal_active_count == 0U)) ||
+       ((tesla_turn_signal_active_state == turn_request) && (tesla_turn_signal_active_count < 5U))) :
+      ((tesla_turn_signal_active_state != 0U) && (tesla_turn_signal_active_count > 0U));
     const bool checksum_valid = tesla_compute_checksum(msg) == tesla_get_checksum(msg);
     const bool valid = tesla_has_vehicle_bus && tesla_turn_signal_validation && request_reason_valid &&
                        validation_template_matches && validation_template_fresh && transition_valid && checksum_valid;
@@ -460,8 +463,15 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
       violation = true;
     } else if (active_turn) {
       tesla_turn_signal_active_state = turn_request;
+      tesla_turn_signal_active_count++;
     } else {
       tesla_turn_signal_active_state = 0U;
+      tesla_turn_signal_active_count = 0U;
+    }
+    // Every validation TX consumes exactly one OEM template. A subsequent
+    // action or cancel must wait for another real vehicle frame.
+    if (valid) {
+      tesla_turn_signal_rx_template_valid = false;
     }
   }
 
@@ -597,6 +607,7 @@ static safety_config tesla_init(uint16_t param) {
   tesla_stock_longitudinal_active = false;
   tesla_ap_stock_lateral_active = false;
   tesla_turn_signal_active_state = 0U;
+  tesla_turn_signal_active_count = 0U;
   tesla_turn_signal_rx_template_valid = false;
   tesla_turn_signal_rx_timestamp = 0U;
   tesla_speed_button_rx_template_valid = false;

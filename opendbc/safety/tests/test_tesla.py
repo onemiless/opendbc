@@ -194,6 +194,23 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
     self.assertTrue(self._rx(self._body_control_msg(0, 0, 12)))
     self.assertTrue(self._tx(self._body_control_msg(3, 4, 13)))
 
+  def test_turn_signal_validation_allows_five_fresh_same_direction_frames(self):
+    self._enable_turn_signal_validation()
+    for index in range(5):
+      counter = (11 + index) & 0xF
+      self.assertTrue(self._rx(self._body_control_msg(0, 0, counter)))
+      self.assertTrue(self._tx(self._body_control_msg(1, 8, (counter + 1) & 0xF)))
+
+    # A sixth action is rejected even with a fresh OEM template.
+    self.assertTrue(self._rx(self._body_control_msg(0, 0, 0)))
+    self.assertFalse(self._tx(self._body_control_msg(1, 8, 1)))
+
+    # Cancellation remains valid and resets the bounded sequence.
+    self.assertTrue(self._rx(self._body_control_msg(0, 0, 1)))
+    self.assertTrue(self._tx(self._body_control_msg(3, 4, 2)))
+    self.assertTrue(self._rx(self._body_control_msg(0, 0, 2)))
+    self.assertTrue(self._tx(self._body_control_msg(2, 8, 3)))
+
   def test_turn_signal_validation_rejects_mutated_fields_and_bad_checksum(self):
     self._enable_turn_signal_validation()
     self.assertTrue(self._rx(self._body_control_msg(0, 0, 11)))
