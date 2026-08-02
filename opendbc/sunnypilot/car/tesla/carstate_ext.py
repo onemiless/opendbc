@@ -769,9 +769,7 @@ class CarStateExt:
   def get_parser(CP: structs.CarParams, CP_SP: structs.CarParamsSP) -> dict[StrEnum, CANParser]:
     messages = {}
 
-    try:
+    if CP_SP.flags & TeslaFlagsSP.HAS_VEHICLE_BUS:
       messages[Bus.adas] = CANParser(DBC[CP.carFingerprint][Bus.adas], [], CANBUS.vehicle)
-    except (KeyError, Exception):
-      pass  # Model X may not have Bus.adas in DBC
 
     return messages

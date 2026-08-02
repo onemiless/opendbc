@@ -1,9 +1,9 @@
-from opendbc.car import get_safety_config, structs
+from opendbc.car import Bus, get_safety_config, structs
 from opendbc.car.interfaces import CarInterfaceBase
 from opendbc.car.tesla.carcontroller import CarController
 from opendbc.car.tesla.carstate import CarState
-from opendbc.car.tesla.values import TeslaSafetyFlags, TeslaFlags, CANBUS, CAR, FSD_14_FW, Ecu
-from opendbc.car.tesla.radar_interface import RadarInterface
+from opendbc.car.tesla.values import TeslaSafetyFlags, TeslaFlags, CANBUS, CAR, DBC, FSD_14_FW, Ecu
+from opendbc.car.tesla.radar_interface import RadarInterface, RADAR_START_ADDR
 
 from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP, TeslaSafetyFlagsSP
 
@@ -29,11 +29,12 @@ class CarInterface(CarInterfaceBase):
     if 0x293 not in fingerprint[CANBUS.autopilot_party]:
       ret.flags |= TeslaFlags.MISSING_DAS_SETTINGS.value
 
-    # This branch does not use Tesla radar. A legacy 0x410 frame on CAN 1 can
-    # otherwise make the interface enable the Continental parser, which then
-    # faults on its missing radar frames and presents a misleading canError.
-    # Keep radar disabled for both HW3 and HW4; longitudinal remains vision based.
-    ret.radarUnavailable = True
+    # Radar support is intended to work for:
+    # - Tesla Model 3 vehicles built approximately mid-2017 through early-2021
+    # - Tesla Model Y vehicles built approximately mid-2020 through early-2021
+    # - Vehicles equipped with the Continental ARS4-B radar (used on HW2 / HW2.5 / early HW3)
+    # - Radar CAN lines must be tapped and connected to CAN bus 1 (normally not used for tesla vehicles)
+    ret.radarUnavailable = RADAR_START_ADDR not in fingerprint[1] or Bus.radar not in DBC[candidate]
 
     ret.alphaLongitudinalAvailable = True
     if alpha_long:

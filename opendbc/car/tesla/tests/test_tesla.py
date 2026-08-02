@@ -7,9 +7,10 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from opendbc.can import CANPacker
-from opendbc.car import gen_empty_fingerprint
+from opendbc.car import Bus, gen_empty_fingerprint, structs
 from opendbc.car.structs import CarParams
 from opendbc.car.tesla.carcontroller import CarController
+from opendbc.car.tesla.carstate import CarState
 from opendbc.car.tesla.interface import CarInterface
 from opendbc.car.tesla.fingerprints import FW_VERSIONS
 from opendbc.car.tesla.radar_interface import RADAR_START_ADDR
@@ -140,14 +141,23 @@ class TestTeslaFingerprint(unittest.TestCase):
     _, steering_control, _ = tesla_can.create_steering_control(0.0, True)
     self.assertEqual(1, steering_control[2] >> 6)
 
-  def test_radar_is_unavailable_for_model_3_and_y(self):
-    # Tesla radar is disabled for this branch. A lone 0x410 frame on CAN 1
-    # must not enable the legacy Continental parser and produce a canError.
-    for candidate in (CAR.TESLA_MODEL_3, CAR.TESLA_MODEL_Y):
+  def test_radar_detection(self):
+    # Test radar availability detection for cars with radar DBC defined.
+    for radar in (True, False):
       fingerprint = gen_empty_fingerprint()
-      fingerprint[1][RADAR_START_ADDR] = 8
-      CP = CarInterface.get_params(candidate, fingerprint, [], False, False, False)
-      assert CP.radarUnavailable
+      if radar:
+        fingerprint[1][RADAR_START_ADDR] = 8
+      CP = CarInterface.get_params(CAR.TESLA_MODEL_3, fingerprint, [], False, False, False)
+      assert CP.radarUnavailable != radar
+
+  def test_vehicle_can_parser_requires_vehicle_bus_fingerprint(self):
+    CP = CarInterface.get_params(CAR.TESLA_MODEL_3, gen_empty_fingerprint(), [], False, False, False)
+    CP_SP = structs.CarParamsSP()
+
+    assert Bus.adas not in CarState.get_can_parsers(CP, CP_SP)
+
+    CP_SP.flags = TeslaFlagsSP.HAS_VEHICLE_BUS
+    assert Bus.adas in CarState.get_can_parsers(CP, CP_SP)
 
   def test_no_radar_car(self):
     # Model X doesn't have radar DBC defined, should always be unavailable
