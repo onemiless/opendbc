@@ -16,7 +16,8 @@ from opendbc.car.tesla.fingerprints import FW_VERSIONS
 from opendbc.car.tesla.radar_interface import RADAR_START_ADDR
 from opendbc.car.tesla.teslacan import TeslaCAN, create_sccm_left_stalk
 from opendbc.car.tesla.values import CANBUS, CAR, FSD_14_FW, TeslaFlags, TeslaSafetyFlags
-from opendbc.sunnypilot.car.tesla.carstate_ext import AP_HYBRID_EXIT_RECOVERY_CONFIRM_SAMPLES, CarStateExt, TeslaLongitudinalSource
+from opendbc.sunnypilot.car.tesla.carstate_ext import (AP_HYBRID_EXIT_RECOVERY_CONFIRM_SAMPLES, CarStateExt,
+                                                        TeslaLongitudinalSource, publish_tesla_road_context)
 from opendbc.sunnypilot.car.tesla import dynamic_acc_debug
 from opendbc.sunnypilot.car.interfaces import (_initialize_tesla_ap_hybrid, _initialize_tesla_auto_speed_limit,
                                                _initialize_tesla_dynamic_auto_stock,
@@ -158,6 +159,13 @@ class TestTeslaFingerprint(unittest.TestCase):
 
     CP_SP.flags = TeslaFlagsSP.HAS_VEHICLE_BUS
     assert Bus.adas in CarState.get_can_parsers(CP, CP_SP)
+
+  def test_road_context_uses_struct_state_until_capnp_conversion(self):
+    state = structs.CarStateSP()
+    publish_tesla_road_context(state, {"DAS_trafficLightColor": 2, "DAS_stopLineDist": 12.5}, 1_000, 1_100)
+    assert state.teslaRoadContext.available
+    assert state.teslaRoadContext.trafficLightColor == 2
+    assert state.teslaRoadContext.stopLineDistance == 12.5
 
   def test_no_radar_car(self):
     # Model X doesn't have radar DBC defined, should always be unavailable

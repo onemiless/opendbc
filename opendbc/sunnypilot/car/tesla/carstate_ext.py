@@ -48,7 +48,7 @@ def publish_tesla_road_context(ret_sp: structs.CarStateSP, values: dict, timesta
   This deliberately does not feed any control state machine. A missing or
   stale frame is represented as unavailable so consumers can safely hide it.
   """
-  context = ret_sp.init("teslaRoadContext")
+  context = ret_sp.teslaRoadContext
   context.available = timestamp_ns > 0 and now_ns - timestamp_ns <= TESLA_ROAD_CONTEXT_STALE_NS
   if context.available:
     context.trafficLightColor = int(values["DAS_trafficLightColor"])
@@ -678,9 +678,6 @@ class CarStateExt:
     cp_ap_party = can_parsers[Bus.ap_party]
     speed_kph = float(cp_party.vl["DI_speed"]["DI_vehicleSpeed"])
     now = time.monotonic()
-    road_values = cp_party.vl["DAS_road"]
-    road_timestamp_ns = cp_party.ts_nanos["DAS_road"]["DAS_stopLineDist"]
-    publish_tesla_road_context(ret_sp, road_values, road_timestamp_ns, time.monotonic_ns())
     self._consume_blinker_samples(cp_party, now)
     autopilot_state = int(cp_ap_party.vl["DAS_status"]["DAS_autopilotState"])
     self._oem_auto_lane_change_state = int(cp_ap_party.vl["DAS_status"]["DAS_autoLaneChangeState"])
