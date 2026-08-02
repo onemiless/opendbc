@@ -140,14 +140,14 @@ class TestTeslaFingerprint(unittest.TestCase):
     _, steering_control, _ = tesla_can.create_steering_control(0.0, True)
     self.assertEqual(1, steering_control[2] >> 6)
 
-  def test_radar_detection(self):
-    # Test radar availability detection for cars with radar DBC defined
-    for radar in (True, False):
+  def test_radar_is_unavailable_for_model_3_and_y(self):
+    # Tesla radar is disabled for this branch. A lone 0x410 frame on CAN 1
+    # must not enable the legacy Continental parser and produce a canError.
+    for candidate in (CAR.TESLA_MODEL_3, CAR.TESLA_MODEL_Y):
       fingerprint = gen_empty_fingerprint()
-      if radar:
-        fingerprint[1][RADAR_START_ADDR] = 8
-      CP = CarInterface.get_params(CAR.TESLA_MODEL_3, fingerprint, [], False, False, False)
-      assert CP.radarUnavailable != radar
+      fingerprint[1][RADAR_START_ADDR] = 8
+      CP = CarInterface.get_params(candidate, fingerprint, [], False, False, False)
+      assert CP.radarUnavailable
 
   def test_no_radar_car(self):
     # Model X doesn't have radar DBC defined, should always be unavailable
