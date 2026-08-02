@@ -39,6 +39,20 @@ PLAN_STALE_S = 0.2
 LANE_CHANGE_STALE_S = 0.2
 LATERAL_STABLE_S = 1.0
 SPEED_AUTO_RESUME_GESTURE_NS = 1_500_000_000
+TESLA_ROAD_CONTEXT_STALE_NS = 1_000_000_000
+
+
+def publish_tesla_road_context(ret_sp: structs.CarStateSP, values: dict, timestamp_ns: int, now_ns: int) -> None:
+  """Publish OEM traffic-control data for visualization only.
+
+  This deliberately does not feed any control state machine. A missing or
+  stale frame is represented as unavailable so consumers can safely hide it.
+  """
+  context = ret_sp.init("teslaRoadContext")
+  context.available = timestamp_ns > 0 and now_ns - timestamp_ns <= TESLA_ROAD_CONTEXT_STALE_NS
+  if context.available:
+    context.trafficLightColor = int(values["DAS_trafficLightColor"])
+    context.stopLineDistance = float(values["DAS_stopLineDist"])
 
 
 class TeslaLongitudinalSource(StrEnum):
@@ -664,6 +678,9 @@ class CarStateExt:
     cp_ap_party = can_parsers[Bus.ap_party]
     speed_kph = float(cp_party.vl["DI_speed"]["DI_vehicleSpeed"])
     now = time.monotonic()
+    road_values = cp_party.vl["DAS_road"]
+    road_timestamp_ns = cp_party.ts_nanos["DAS_road"]["DAS_stopLineDist"]
+    publish_tesla_road_context(ret_sp, road_values, road_timestamp_ns, time.monotonic_ns())
     self._consume_blinker_samples(cp_party, now)
     autopilot_state = int(cp_ap_party.vl["DAS_status"]["DAS_autopilotState"])
     self._oem_auto_lane_change_state = int(cp_ap_party.vl["DAS_status"]["DAS_autoLaneChangeState"])
