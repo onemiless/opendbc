@@ -185,6 +185,119 @@ BO_ 778 DAS_object: 8 DAS
  SG_ DAS_rightVeh2Heading m5 : 48|8@1+ (0.0245437,-3.1415936) [-3.1415936|3.116] "rad" UI
 
 
+BO_ 536 UI_driverAssistRoadSign: 8 UI
+ SG_ UI_roadSign M : 0|8@1+ (1,0) [0|255] "" DAS
+ SG_ UI_dummyData m0 : 8|1@1+ (1,0) [0|1] "" DAS
+ SG_ UI_stopSignStopLineDist m1 : 8|10@1+ (0.25,-8) [-8|247.75] "m" DAS
+ SG_ UI_stopSignStopLineConf m1 : 18|7@1+ (1,0) [0|127] "" DAS
+ SG_ UI_trafficLightStopLineDist m2 : 8|10@1+ (0.25,-8) [-8|247.75] "m" DAS
+ SG_ UI_trafficLightStopLineConf m2 : 18|7@1+ (1,0) [0|127] "" DAS
+ SG_ UI_baseMapSpeedLimitMPS m3 : 8|8@1+ (0.25,0) [0|63.75] "m/s" DAS
+ SG_ UI_bottomQrtlFleetSpeedMPS m3 : 16|8@1+ (0.25,0) [0|63.75] "m/s" DAS
+ SG_ UI_topQrtlFleetSpeedMPS m3 : 24|8@1+ (0.25,0) [0|63.75] "m/s" DAS
+ SG_ UI_meanFleetSplineSpeedMPS m4 : 8|8@1+ (0.25,0) [0|63.75] "m/s" DAS
+ SG_ UI_medianFleetSpeedMPS m4 : 16|8@1+ (0.25,0) [0|63.75] "m/s" DAS
+ SG_ UI_meanFleetSplineAccelMPS2 m4 : 24|8@1+ (0.05,-6.35) [-6.35|6.4] "m/s2" DAS
+ SG_ UI_rampType m4 : 32|3@1+ (1,0) [0|7] "" DAS
+ SG_ UI_valhallaRamp m4 : 35|2@1+ (1,0) [0|3] "" DAS
+ SG_ UI_overrideACMFleetSpeed m4 : 38|1@1+ (1,0) [0|1] "" DAS
+ SG_ UI_currSplineIdFull m5 : 8|32@1+ (1,0) [0|4294967295] "" DAS
+ SG_ UI_splineLocConfidence : 40|7@1+ (1,0) [0|127] "" DAS
+ SG_ UI_splineID : 48|4@1+ (1,0) [0|15] "" DAS
+ SG_ UI_roadSignCounter : 52|4@1+ (1,0) [0|15] "" DAS
+ SG_ UI_roadSignChecksum : 56|8@1+ (1,0) [0|255] "" DAS
+
+BO_ 665 DAS_integratedSafetyFront: 8 DAS
+ SG_ DAS_safetyFrontChecksum : 0|8@1+ (1,0) [0|255] "" DAS
+ SG_ DAS_safetyFrontCounter : 8|4@1+ (1,0) [0|15] "" DAS
+ SG_ DAS_timeToImpactFront : 12|9@1+ (1,0) [0|511] "s" DAS
+ SG_ DAS_timeToImpactFrontQF : 21|1@1+ (1,0) [0|1] "" DAS
+ SG_ DAS_predictedImpactVelFront : 22|7@1+ (0.5,0) [0|63.5] "m/s" DAS
+ SG_ DAS_predictedImpactVelFrontQF : 29|1@1+ (1,0) [0|1] "" DAS
+ SG_ DAS_relativeVelocityFront : 30|6@1+ (1,-32) [-32|31] "m/s" DAS
+ SG_ DAS_relativeVelocityFrontQF : 36|1@1+ (1,0) [0|1] "" DAS
+ SG_ DAS_targetDistanceFront : 37|7@1+ (0.1,0) [0|12.7] "m" DAS
+ SG_ DAS_targetDistanceFrontQF : 44|1@1+ (1,0) [0|1] "" DAS
+ SG_ DAS_relativeAccelerationFront : 45|8@1+ (0.1,-12.8) [-12.8|12.7] "m/s2" DAS
+ SG_ DAS_relativeAccelerationFrontQF : 53|1@1+ (1,0) [0|1] "" DAS
+ SG_ DAS_imminentCollisionFront : 54|1@1+ (1,0) [0|1] "" DAS
+ SG_ DAS_imminentCollisionFrontQF : 55|1@1+ (1,0) [0|1] "" DAS
+ SG_ DAS_predictedImpactOvrlapFront : 56|3@1+ (12.5,0) [0|87.5] "%" DAS
+ SG_ DAS_predictedImpactOvrlapFrontQF : 59|1@1+ (1,0) [0|1] "" DAS
+ SG_ DAS_idfEnableFlag : 60|1@1+ (1,0) [0|1] "" DAS
+
+BO_ 921 DAS_statusCH: 8 DAS
+ SG_ DAS_autopilotState : 0|4@1+ (1,0) [0|15] "" DAS
+ SG_ DAS_blindSpotRearLeft : 4|2@1+ (1,0) [0|3] "" DAS
+ SG_ DAS_blindSpotRearRight : 6|2@1+ (1,0) [0|3] "" DAS
+ SG_ DAS_fusedSpeedLimit : 8|5@1+ (5,0) [0|155] "kph" DAS
+ SG_ DAS_suppressSpeedWarning : 13|1@1+ (1,0) [0|1] "" DAS
+ SG_ DAS_summonObstacle : 14|1@1+ (1,0) [0|1] "" DAS
+ SG_ DAS_summonClearedGate : 15|1@1+ (1,0) [0|1] "" DAS
+ SG_ DAS_visionOnlySpeedLimit : 16|5@1+ (5,0) [0|155] "kph" DAS
+ SG_ DAS_heaterState : 21|1@1+ (1,0) [0|1] "" DAS
+ SG_ DAS_forwardCollisionWarning : 22|2@1+ (1,0) [0|3] "" DAS
+ SG_ DAS_autoparkReady : 24|1@1+ (1,0) [0|1] "" DAS
+ SG_ DAS_autoParked : 25|1@1+ (1,0) [0|1] "" DAS
+ SG_ DAS_autoparkActive : 26|1@1+ (1,0) [0|1] "" DAS
+ SG_ DAS_summonFwdLeashReached : 27|1@1+ (1,0) [0|1] "" DAS
+ SG_ DAS_summonRvsLeashReached : 28|1@1+ (1,0) [0|1] "" DAS
+ SG_ DAS_lssState : 29|3@1+ (1,0) [0|7] "" DAS
+ SG_ DAS_sideCollisionAvoid : 32|2@1+ (1,0) [0|3] "" DAS
+ SG_ DAS_sideCollisionWarning : 34|2@1+ (1,0) [0|3] "" DAS
+ SG_ DAS_sideCollisionInhibit : 36|1@1+ (1,0) [0|1] "" DAS
+ SG_ DAS_laneDepartureWarning : 37|3@1+ (1,0) [0|7] "" DAS
+ SG_ DAS_fleetSpeedState : 40|2@1+ (1,0) [0|3] "" DAS
+ SG_ DAS_autopilotHandsOnState : 42|4@1+ (1,0) [0|15] "" DAS
+ SG_ DAS_autoLaneChangeState : 46|5@1+ (1,0) [0|31] "" DAS
+ SG_ DAS_summonAvailable : 51|1@1+ (1,0) [0|1] "" DAS
+ SG_ DAS_statusCounter : 52|4@1+ (1,0) [0|15] "" DAS
+ SG_ DAS_statusChecksum : 56|8@1+ (1,0) [0|255] "" DAS
+
+BO_ 923 DAS_status: 8 DAS
+ SG_ DAS_autopilotState : 0|4@1+ (1,0) [0|15] "" DAS
+ SG_ DAS_blindSpotRearLeft : 4|2@1+ (1,0) [0|3] "" DAS
+ SG_ DAS_blindSpotRearRight : 6|2@1+ (1,0) [0|3] "" DAS
+ SG_ DAS_fusedSpeedLimit : 8|5@1+ (5,0) [0|155] "kph" DAS
+ SG_ DAS_suppressSpeedWarning : 13|1@1+ (1,0) [0|1] "" DAS
+ SG_ DAS_summonObstacle : 14|1@1+ (1,0) [0|1] "" DAS
+ SG_ DAS_summonClearedGate : 15|1@1+ (1,0) [0|1] "" DAS
+ SG_ DAS_visionOnlySpeedLimit : 16|5@1+ (5,0) [0|155] "kph" DAS
+ SG_ DAS_heaterState : 21|1@1+ (1,0) [0|1] "" DAS
+ SG_ DAS_forwardCollisionWarning : 22|2@1+ (1,0) [0|3] "" DAS
+ SG_ DAS_autoparkReady : 24|1@1+ (1,0) [0|1] "" DAS
+ SG_ DAS_autoParked : 25|1@1+ (1,0) [0|1] "" DAS
+ SG_ DAS_autoparkActive : 26|1@1+ (1,0) [0|1] "" DAS
+ SG_ DAS_summonFwdLeashReached : 27|1@1+ (1,0) [0|1] "" DAS
+ SG_ DAS_summonRvsLeashReached : 28|1@1+ (1,0) [0|1] "" DAS
+ SG_ DAS_lssState : 29|3@1+ (1,0) [0|7] "" DAS
+ SG_ DAS_sideCollisionAvoid : 32|2@1+ (1,0) [0|3] "" DAS
+ SG_ DAS_sideCollisionWarning : 34|2@1+ (1,0) [0|3] "" DAS
+ SG_ DAS_sideCollisionInhibit : 36|1@1+ (1,0) [0|1] "" DAS
+ SG_ DAS_laneDepartureWarning : 37|3@1+ (1,0) [0|7] "" DAS
+ SG_ DAS_fleetSpeedState : 40|2@1+ (1,0) [0|3] "" DAS
+ SG_ DAS_autopilotHandsOnState : 42|4@1+ (1,0) [0|15] "" DAS
+ SG_ DAS_autoLaneChangeState : 46|5@1+ (1,0) [0|31] "" DAS
+ SG_ DAS_summonAvailable : 51|1@1+ (1,0) [0|1] "" DAS
+ SG_ DAS_statusCounter : 52|4@1+ (1,0) [0|15] "" DAS
+ SG_ DAS_statusChecksum : 56|8@1+ (1,0) [0|255] "" DAS
+
+BO_ 1024 APP_pedestrianDetection: 8 APP
+ SG_ APP_pedestrianDetectedFrontMain : 0|1@1+ (1,0) [0|1] "" DAS
+ SG_ APP_pedestrianDetectedFrontFisheye : 1|1@1+ (1,0) [0|1] "" DAS
+ SG_ APP_pedestrianDetectedFrontNarrow : 2|1@1+ (1,0) [0|1] "" DAS
+ SG_ APP_pedestrianDetectedLeftPillar : 3|1@1+ (1,0) [0|1] "" DAS
+ SG_ APP_pedestrianDetectedLeftRepeater : 4|1@1+ (1,0) [0|1] "" DAS
+ SG_ APP_pedestrianDetectedRightPillar : 5|1@1+ (1,0) [0|1] "" DAS
+ SG_ APP_pedestrianDetectedRightRepeater : 6|1@1+ (1,0) [0|1] "" DAS
+ SG_ APP_pedestrianDetectedBackup : 7|1@1+ (1,0) [0|1] "" DAS
+ SG_ APP_closestPedestrian1dX : 13|6@1- (0.4,0) [-12.8|12.4] "m" DAS
+ SG_ APP_closestPedestrian1dY : 19|6@1- (0.4,0) [-12.8|12.4] "m" DAS
+ SG_ APP_closestPedestrian2dX : 25|6@1- (0.4,0) [-12.8|12.4] "m" DAS
+ SG_ APP_closestPedestrian2dY : 31|6@1- (0.4,0) [-12.8|12.4] "m" DAS
+ SG_ APP_closestPedestrian3dX : 37|6@1- (0.4,0) [-12.8|12.4] "m" DAS
+ SG_ APP_closestPedestrian3dY : 43|6@1- (0.4,0) [-12.8|12.4] "m" DAS
+
 VAL_ 568 UI_mapSpeedUnits 0 "MPH" 1 "KPH" ;
 VAL_ 568 UI_roadClass 0 "UNKNOWN_INVALID_SNA" 1 "CLASS_1_MAJOR" 2 "CLASS_2" 3 "CLASS_3" 4 "CLASS_4" 5 "CLASS_5" 6 "CLASS_6_MINOR" ;
 VAL_ 568 UI_mapSpeedLimitType 1 "REGULAR" 2 "ADVISORY" 3 "DEPENDENT" 4 "BUMPS" 7 "UNKNOWN_SNA" ;
