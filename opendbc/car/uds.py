@@ -266,6 +266,10 @@ class InvalidSubAddressError(Exception):
   pass
 
 
+class InvalidIsoTpFrameTypeError(Exception):
+  pass
+
+
 _negative_response_codes = {
     0x00: 'positive response',
     0x10: 'general reject',
@@ -480,7 +484,14 @@ class IsoTpMessage:
     try:
       while True:
         for msg in self._can_client.recv():
-          frame_type = self._isotp_rx_next(msg)
+          try:
+            frame_type = self._isotp_rx_next(msg)
+          except InvalidIsoTpFrameTypeError:
+            # Some ECUs reuse diagnostic response addresses for normal CAN
+            # traffic. Reserved ISO-TP frame types are therefore unrelated
+            # bus traffic, not a failed diagnostic response.
+            carlog.debug(f"ISO-TP: ignoring non-ISO-TP frame - 0x{bytes.hex(msg)}")
+            continue
           start_time = time.monotonic()
           # Anything that signifies we're building a response
           rx_in_progress = frame_type in (ISOTP_FRAME_TYPE.FIRST, ISOTP_FRAME_TYPE.CONSECUTIVE)
@@ -586,7 +597,7 @@ class IsoTpMessage:
 
     # 4-15 - reserved
     else:
-      raise Exception(f"isotp - rx: invalid frame type: {rx_data[0] >> 4}")
+      raise InvalidIsoTpFrameTypeError(f"isotp - rx: invalid frame type: {rx_data[0] >> 4}")
 
 
 FUNCTIONAL_ADDRS = [0x7DF, 0x18DB33F1]
