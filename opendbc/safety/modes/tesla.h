@@ -20,8 +20,8 @@
   {.msg = {{0x3C2, 1, 8, 2U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true, .ignore_frequency_check = true}, { 0 }, { 0 }}},   /* VCLEFT_switchStatus */ \
 
 #define TESLA_STEERING_DISENGAGE_TORQUE 500 // cNm
-#define TESLA_TURN_SIGNAL_SESSION_TIMEOUT_US 12000000U
-#define TESLA_TURN_SIGNAL_SESSION_MAX_FRAMES 64U
+#define TESLA_TURN_SIGNAL_SESSION_TIMEOUT_US 60000000U
+#define TESLA_TURN_SIGNAL_SESSION_MAX_FRAMES 1200U
 
 static bool tesla_longitudinal = false;
 static bool tesla_fsd_14 = false;
@@ -60,7 +60,7 @@ static bool tesla_speed_button_validation = false;
 static bool tesla_auto_speed_limit = false;
 static bool tesla_ars408_radar = false;
 static uint8_t tesla_turn_signal_active_state = 0U;
-static uint8_t tesla_turn_signal_active_count = 0U;
+static uint16_t tesla_turn_signal_active_count = 0U;
 static uint32_t tesla_turn_signal_session_timestamp = 0U;
 static bool tesla_turn_signal_session_timed_out = false;
 static bool tesla_turn_signal_rx_template_valid = false;

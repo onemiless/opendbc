@@ -277,25 +277,22 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
     self.assertTrue(self._rx(self._body_control_msg(0, 0, 11)))
     self.assertTrue(self._tx(self._body_control_msg(1, 8, 12)))
 
-    self.safety.set_timer(12_000_101)
+    self.safety.set_timer(59_000_000)
     self.assertTrue(self._rx(self._body_control_msg(0, 0, 12)))
-    self.assertFalse(self._tx(self._body_control_msg(1, 8, 13)))
+    self.assertTrue(self._tx(self._body_control_msg(1, 8, 13)))
 
+    self.safety.set_timer(60_000_101)
     self.assertTrue(self._rx(self._body_control_msg(0, 0, 13)))
-    self.assertTrue(self._tx(self._body_control_msg(3, 4, 14)))
-    self.assertTrue(self._rx(self._body_control_msg(0, 0, 14)))
-    self.assertTrue(self._tx(self._body_control_msg(2, 8, 15)))
+    self.assertFalse(self._tx(self._body_control_msg(1, 8, 14)))
 
-  def test_turn_signal_validation_rejects_direction_change_without_cancel(self):
-    self._enable_turn_signal_validation()
-    self.assertTrue(self._rx(self._body_control_msg(0, 0, 11)))
-    self.assertTrue(self._tx(self._body_control_msg(1, 8, 12)))
-    self.assertTrue(self._rx(self._body_control_msg(0, 0, 12)))
-    self.assertFalse(self._tx(self._body_control_msg(2, 8, 13)))
+    self.assertTrue(self._rx(self._body_control_msg(0, 0, 14)))
+    self.assertTrue(self._tx(self._body_control_msg(3, 4, 15)))
+    self.assertTrue(self._rx(self._body_control_msg(0, 0, 15)))
+    self.assertTrue(self._tx(self._body_control_msg(2, 8, 0)))
 
   def test_turn_signal_validation_has_independent_safety_frame_cap(self):
     self._enable_turn_signal_validation()
-    for index in range(64):
+    for index in range(1200):
       counter = index & 0xF
       self.assertTrue(self._rx(self._body_control_msg(0, 0, counter)))
       self.assertTrue(self._tx(self._body_control_msg(1, 8, (counter + 1) & 0xF)))
@@ -304,6 +301,13 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
     self.assertFalse(self._tx(self._body_control_msg(1, 8, 1)))
     self.assertTrue(self._rx(self._body_control_msg(0, 0, 1)))
     self.assertTrue(self._tx(self._body_control_msg(3, 4, 2)))
+
+  def test_turn_signal_validation_rejects_direction_change_without_cancel(self):
+    self._enable_turn_signal_validation()
+    self.assertTrue(self._rx(self._body_control_msg(0, 0, 11)))
+    self.assertTrue(self._tx(self._body_control_msg(1, 8, 12)))
+    self.assertTrue(self._rx(self._body_control_msg(0, 0, 12)))
+    self.assertFalse(self._tx(self._body_control_msg(2, 8, 13)))
 
   def test_turn_signal_validation_rejects_mutated_fields_and_bad_checksum(self):
     self._enable_turn_signal_validation()
