@@ -57,7 +57,9 @@ class TeslaSpeedLimitController:
       self.manual_override_active = False
       log_dynamic_acc("speed_limit_controller", "manual_speed_override_cleared", reason=reason)
 
-  def _reset(self, *, clear_manual_override: bool) -> None:
+  def _reset(self) -> None:
+    # Transmission state can reset within a drive; driver override must survive
+    # until an explicit opposite-direction gesture or a new controller session.
     self._reset_pending()
     self.remaining_steps = 0
     self.feedback_blocked_signature = None
@@ -67,9 +69,6 @@ class TeslaSpeedLimitController:
     self.planned_target_display = 0
     self.target_change_nanos = 0
     self.target_stabilizing = False
-    if clear_manual_override:
-      self.manual_resume_feedback_guard_until_nanos = 0
-      self._clear_manual_override("cruise_disengaged")
 
   def _sync_manual_counters(self, CS) -> tuple[bool, bool]:
     manual_counter = int(getattr(CS, "tesla_manual_speed_adjustment_counter", 0))
@@ -92,16 +91,6 @@ class TeslaSpeedLimitController:
 
   def update(self, CC, CS, now_nanos: int) -> list[CanData]:
     manual_changed, resume_changed = self._sync_manual_counters(CS)
-    # Tesla AP owns the steering-wheel cruise controls while it is active.
-    # Injecting a synthetic 0x3C2 speed tick in this state can make the OEM
-    # controller abort the AP/ACC session.
-    if getattr(CS, "tesla_autopilot_active", False):
-      self._reset(clear_manual_override=False)
-      return []
-    if not self.configured or not CC.enabled or CC.cruiseControl.cancel or not CS.out.cruiseState.enabled:
-      self._reset(clear_manual_override=True)
-      return []
-
     # Consume the physical resume gesture before checking target validity.
     # A manual wheel change can temporarily make SLA publish an invalid target;
     # dropping the counter in that window would leave override latched forever.
@@ -115,8 +104,15 @@ class TeslaSpeedLimitController:
       self.manual_override_active = True
       self._reset_pending()
 
+    # Observe physical gestures even while transmission is gated. AP owns the
+    # wheel controls while active, so synthetic ticks remain prohibited there.
+    if (getattr(CS, "tesla_autopilot_active", False) or not self.configured or not CC.enabled or
+        CC.cruiseControl.cancel or not CS.out.cruiseState.enabled):
+      self._reset()
+      return []
+
     if CS.out.brakePressed or not getattr(CS, "tesla_speed_limit_target_valid", False):
-      self._reset(clear_manual_override=False)
+      self._reset()
       return []
 
     current_speed = float(CS.out.cruiseState.speedCluster)
@@ -140,8 +136,6 @@ class TeslaSpeedLimitController:
       # also covers the first valid target after engagement, where an
       # intermediate offset target must never produce a wrong-direction tick.
       self.target_stabilizing = True
-      self.manual_resume_feedback_guard_until_nanos = 0
-      self._clear_manual_override("speed_limit_changed")
 
     resume_feedback_guard_active = now_nanos < self.manual_resume_feedback_guard_until_nanos
     external_speed_change = (self.last_current_display is not None and current_display != self.last_current_display and
