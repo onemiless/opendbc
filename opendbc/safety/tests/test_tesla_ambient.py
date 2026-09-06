@@ -7,9 +7,9 @@ from opendbc.sunnypilot.car.tesla.values import TeslaSafetyFlagsSP
 
 
 class TestTeslaAmbientSafety(unittest.TestCase):
-  TEMPLATE = bytes.fromhex("111234563206feab")
-  LEFT = bytes.fromhex("03ff000032aefeab")
-  RIGHT = bytes.fromhex("03ff00003256ffab")
+  TEMPLATE = bytes.fromhex("0cffd5aa00f801")
+  LEFT = bytes.fromhex("02ff000064a800")
+  RIGHT = bytes.fromhex("02ff0000645001")
 
   def setUp(self):
     self.safety = libsafety_py.libsafety
@@ -49,8 +49,8 @@ class TestTeslaAmbientSafety(unittest.TestCase):
     self.ready()
     self.assertFalse(self.tx(self.LEFT, bus=0))
     self.assertFalse(self.tx(self.LEFT, bus=2))
-    self.assertFalse(self.tx(self.LEFT[:7]))
-    for index, mask in ((1, 1), (2, 1), (3, 1), (4, 1), (5, 0x10), (6, 1), (7, 1), (0, 8)):
+    self.assertFalse(self.tx(self.LEFT + b"\0"))
+    for index, mask in ((1, 1), (2, 1), (3, 1), (4, 1), (5, 0x10), (6, 1), (0, 8)):
       data = bytearray(self.LEFT)
       data[index] ^= mask
       self.assertFalse(self.tx(data), (index, mask))

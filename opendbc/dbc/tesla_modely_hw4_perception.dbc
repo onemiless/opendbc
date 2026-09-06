@@ -565,7 +565,7 @@ BO_ 826 UI_range: 8 APP
 CM_ BO_ 658 "Model Y TCAN schema snapshot: BMS_socUI. Values above 100 percent are unavailable.";
 CM_ BO_ 826 "Model Y TCAN schema snapshot: range and whpm have no documented units. Do not label as km or trip consumption without vehicle validation.";
 
-BO_ 1657 UI_ambientLightingCtrls: 8 APP
+BO_ 1657 UI_ambientLightingCtrls: 7 APP
  SG_ UI_ambientLightPowerOverride : 0|1@1+ (1,0) [0|0] "" UI
  SG_ UI_rgbEnableState : 1|2@1+ (1,0) [0|0] "" UI
  SG_ UI_rgbEffectType : 3|5@1+ (1,0) [0|0] "" UI

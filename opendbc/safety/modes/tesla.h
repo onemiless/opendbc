@@ -183,15 +183,15 @@ static int tesla_get_steer_ctrl_type(const int ctrl_type) {
 }
 
 static void tesla_ambient_rx_observer(const CANPacket_t *msg) {
-  if ((GET_LEN(msg) == 8U) && !msg->extended && !msg->returned && !msg->rejected) {
-    if ((msg->bus == 1U) && (msg->addr == 0x679U)) {
-      for (uint8_t i = 0U; i < 8U; i++) {
+  if (!msg->extended && !msg->returned && !msg->rejected) {
+    if ((GET_LEN(msg) == 7U) && (msg->bus == 1U) && (msg->addr == 0x679U)) {
+      for (uint8_t i = 0U; i < 7U; i++) {
         tesla_ambient_template[i] = msg->data[i];
       }
       tesla_ambient_template_ts = microsecond_timer_get();
       tesla_ambient_template_valid = true;
     }
-    if ((msg->bus == 0U) && (msg->addr == 0x118U)) {
+    if ((GET_LEN(msg) == 8U) && (msg->bus == 0U) && (msg->addr == 0x118U)) {
       uint8_t checksum = 0x19U;
       for (uint8_t i = 1U; i < 8U; i++) {
         checksum += msg->data[i];
@@ -458,12 +458,11 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
       (safety_get_ts_elapsed(now, tesla_ambient_speed_ts) <= 1000000U);
     const bool target = (((msg->data[5] & 0xF8U) == 0xA8U) && ((msg->data[6] & 1U) == 0U)) ||
                         (((msg->data[5] & 0xF8U) == 0x50U) && ((msg->data[6] & 1U) == 1U));
-    const uint8_t brightness = msg->data[4] & 0x7FU;
     const bool fixed_red = (msg->data[0] == ((tesla_ambient_template[0] & 1U) | 2U)) &&
       (msg->data[1] == 255U) && (msg->data[2] == 0U) && (msg->data[3] == 0U) &&
-      (msg->data[4] == tesla_ambient_template[4]) && (brightness > 0U) && (brightness <= 100U) &&
+      (msg->data[4] == ((tesla_ambient_template[4] & 0x80U) | 100U)) &&
       ((msg->data[5] & 7U) == (tesla_ambient_template[5] & 6U)) &&
-      ((msg->data[6] & 0xFEU) == (tesla_ambient_template[6] & 0xFEU)) && (msg->data[7] == tesla_ambient_template[7]);
+      ((msg->data[6] & 0xFEU) == (tesla_ambient_template[6] & 0xFEU));
     const bool new_session = !tesla_ambient_tx_valid || (safety_get_ts_elapsed(now, tesla_ambient_tx_ts) >= 1000000U);
     // Host sends at 10 Hz; tolerate USB scheduling jitter while retaining the 30-frame / 3-second cap.
     const bool rate = !tesla_ambient_tx_valid || (safety_get_ts_elapsed(now, tesla_ambient_tx_ts) >= 80000U);
@@ -653,7 +652,7 @@ static safety_config tesla_init(uint16_t param) {
     {0x399, 0, 8, .check_relay = false, .disable_static_blocking = true},  // ISA speed chime suppress
     {0x3E9, 1, 8, .check_relay = false, .disable_static_blocking = true},  // DAS_bodyControls (validation only)
     {0x3C2, 1, 8, .check_relay = false, .disable_static_blocking = true},  // VCLEFT_switchStatus (validation only)
-    {0x679, 1, 8, .check_relay = false, .disable_static_blocking = true}, // Fixed red ambient test, parked only
+    {0x679, 1, 7, .check_relay = false, .disable_static_blocking = true}, // Fixed red ambient test, parked only
   };
 
   static const CanMsg TESLA_M3_Y_LONG_TX_MSGS[] = {
@@ -666,7 +665,7 @@ static safety_config tesla_init(uint16_t param) {
     {0x399, 0, 8, .check_relay = false, .disable_static_blocking = true}, // ISA speed chime suppress
     {0x3E9, 1, 8, .check_relay = false, .disable_static_blocking = true}, // DAS_bodyControls (validation only)
     {0x3C2, 1, 8, .check_relay = false, .disable_static_blocking = true}, // VCLEFT_switchStatus (validation only)
-    {0x679, 1, 8, .check_relay = false, .disable_static_blocking = true}, // Fixed red ambient test, parked only
+    {0x679, 1, 7, .check_relay = false, .disable_static_blocking = true}, // Fixed red ambient test, parked only
   };
 
   static const CanMsg TESLA_M3_Y_ARS408_TX_MSGS[] = {
@@ -679,7 +678,7 @@ static safety_config tesla_init(uint16_t param) {
     {0x399, 0, 8, .check_relay = false, .disable_static_blocking = true},
     {0x3E9, 1, 8, .check_relay = false, .disable_static_blocking = true},
     {0x3C2, 1, 8, .check_relay = false, .disable_static_blocking = true},
-    {0x679, 1, 8, .check_relay = false, .disable_static_blocking = true}, // Fixed red ambient test, parked only
+    {0x679, 1, 7, .check_relay = false, .disable_static_blocking = true}, // Fixed red ambient test, parked only
     {0x300, 1, 2, .check_relay = false, .disable_static_blocking = true},
     {0x301, 1, 2, .check_relay = false, .disable_static_blocking = true},
   };
@@ -694,7 +693,7 @@ static safety_config tesla_init(uint16_t param) {
     {0x399, 0, 8, .check_relay = false, .disable_static_blocking = true},
     {0x3E9, 1, 8, .check_relay = false, .disable_static_blocking = true},
     {0x3C2, 1, 8, .check_relay = false, .disable_static_blocking = true},
-    {0x679, 1, 8, .check_relay = false, .disable_static_blocking = true}, // Fixed red ambient test, parked only
+    {0x679, 1, 7, .check_relay = false, .disable_static_blocking = true}, // Fixed red ambient test, parked only
     {0x300, 1, 2, .check_relay = false, .disable_static_blocking = true},
     {0x301, 1, 2, .check_relay = false, .disable_static_blocking = true},
   };
