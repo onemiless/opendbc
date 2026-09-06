@@ -224,6 +224,8 @@ typedef bool (*fwd_hook)(int bus_num, int addr);      // returns true if the mes
 typedef struct {
   safety_hook_init init;
   rx_hook rx;
+  // Optional accessory observations: must validate their own frames and never enable controls.
+  rx_hook rx_observer;
   tx_hook tx;
   fwd_hook fwd;
   get_checksum_t get_checksum;

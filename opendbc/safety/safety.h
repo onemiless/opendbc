@@ -202,6 +202,10 @@ bool safety_rx_hook(const CANPacket_t *msg) {
     current_hooks->rx(msg);
   }
 
+  if (valid && (current_hooks->rx_observer != NULL)) {
+    current_hooks->rx_observer(msg);
+  }
+
   // Handles gas, brake, and regen paddle
   generic_rx_checks();
 
