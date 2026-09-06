@@ -10,7 +10,7 @@ from opendbc.can import CANPacker
 from opendbc.car import Bus, gen_empty_fingerprint, structs
 from opendbc.car.structs import CarParams
 from opendbc.car.tesla.carcontroller import CarController
-from opendbc.car.tesla.carstate import CarState
+from opendbc.car.tesla.carstate import CarState, blindspot_warning_active
 from opendbc.car.tesla.interface import CarInterface
 from opendbc.car.tesla.fingerprints import FW_VERSIONS
 from opendbc.car.tesla.radar_interface import RADAR_START_ADDR
@@ -26,6 +26,14 @@ from opendbc.sunnypilot.car.interfaces import (_initialize_tesla_ap_hybrid, _ini
 from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP, TeslaSafetyFlagsSP
 
 Ecu = CarParams.Ecu
+
+
+class TestTeslaBlindspotState(unittest.TestCase):
+  def test_only_warning_levels_are_active(self):
+    self.assertFalse(blindspot_warning_active(0))
+    self.assertTrue(blindspot_warning_active(1))
+    self.assertTrue(blindspot_warning_active(2))
+    self.assertFalse(blindspot_warning_active(3))  # SNA is not an occupied blind spot.
 
 
 class TestTeslaSccmLeftStalk(unittest.TestCase):

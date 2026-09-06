@@ -10,6 +10,9 @@ class TestTeslaAmbientSafety(unittest.TestCase):
   TEMPLATE = bytes.fromhex("0cffd5aa00f801")
   LEFT = bytes.fromhex("02ff000064a800")
   RIGHT = bytes.fromhex("02ff0000645001")
+  LEFT_OFF = bytes.fromhex("02ff000000a800")
+  BOTH = bytes.fromhex("02ff000064f801")
+  BOTH_OFF = bytes.fromhex("02ff000000f801")
 
   def setUp(self):
     self.safety = libsafety_py.libsafety
@@ -38,6 +41,12 @@ class TestTeslaAmbientSafety(unittest.TestCase):
       self.ready()
       self.assertTrue(self.tx(data))
       self.assertFalse(self.tx(data))  # No unbounded burst.
+
+  def test_blindspot_flash_allows_off_phase_and_both_sides(self):
+    for data in (self.LEFT_OFF, self.BOTH, self.BOTH_OFF):
+      self.setUp()
+      self.ready()
+      self.assertTrue(self.tx(data))
 
   def test_no_fresh_vehicle_context(self):
     self.assertFalse(self.tx(self.LEFT))
@@ -85,15 +94,15 @@ class TestTeslaAmbientSafety(unittest.TestCase):
     self.safety.set_safety_hooks(CarParams.SafetyModel.noOutput, 0)
     self.assertFalse(self.tx(self.LEFT))
 
-  def test_three_second_session_cap(self):
-    for index in range(30):
+  def test_fifteen_second_session_cap(self):
+    for index in range(150):
       self.safety.set_timer(100 + index * 100000)
       self.ready()
       self.assertTrue(self.tx(self.LEFT))
-    self.safety.set_timer(3000100)
+    self.safety.set_timer(15000100)
     self.ready()
     self.assertFalse(self.tx(self.LEFT))
-    self.safety.set_timer(3900100)
+    self.safety.set_timer(15900100)
     self.ready()
     self.assertTrue(self.tx(self.RIGHT))
 

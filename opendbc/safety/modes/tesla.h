@@ -455,17 +455,19 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
     const bool fresh = tesla_ambient_template_valid &&
       (safety_get_ts_elapsed(now, tesla_ambient_template_ts) <= 1000000U);
     const bool target = (((msg->data[5] & 0xF8U) == 0xA8U) && ((msg->data[6] & 1U) == 0U)) ||
-                        (((msg->data[5] & 0xF8U) == 0x50U) && ((msg->data[6] & 1U) == 1U));
+                        (((msg->data[5] & 0xF8U) == 0x50U) && ((msg->data[6] & 1U) == 1U)) ||
+                        (((msg->data[5] & 0xF8U) == 0xF8U) && ((msg->data[6] & 1U) == 1U));
+    const uint8_t brightness = msg->data[4] & 0x7FU;
     const bool fixed_red = (msg->data[0] == ((tesla_ambient_template[0] & 1U) | 2U)) &&
       (msg->data[1] == 255U) && (msg->data[2] == 0U) && (msg->data[3] == 0U) &&
-      (msg->data[4] == ((tesla_ambient_template[4] & 0x80U) | 100U)) &&
+      ((brightness == 0U) || (brightness == 100U)) && ((msg->data[4] & 0x80U) == (tesla_ambient_template[4] & 0x80U)) &&
       ((msg->data[5] & 7U) == (tesla_ambient_template[5] & 6U)) &&
       ((msg->data[6] & 0xFEU) == (tesla_ambient_template[6] & 0xFEU));
     const bool new_session = !tesla_ambient_tx_valid || (safety_get_ts_elapsed(now, tesla_ambient_tx_ts) >= 1000000U);
     // Host sends at 10 Hz; tolerate USB scheduling jitter while retaining the 30-frame / 3-second cap.
     const bool rate = !tesla_ambient_tx_valid || (safety_get_ts_elapsed(now, tesla_ambient_tx_ts) >= 80000U);
-    const bool session = new_session || ((safety_get_ts_elapsed(now, tesla_ambient_session_ts) < 3000000U) &&
-                                        (tesla_ambient_session_count < 30U));
+    const bool session = new_session || ((safety_get_ts_elapsed(now, tesla_ambient_session_ts) < 15000000U) &&
+                                        (tesla_ambient_session_count < 150U));
     if (!tesla_has_vehicle_bus || !fresh || !target || !fixed_red || !rate || !session) {
       violation = true;
     }

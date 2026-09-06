@@ -12,6 +12,10 @@ ButtonType = structs.CarState.ButtonEvent.Type
 STEERING_KNUCKLE_ARM_LENGTH_M = 0.11
 
 
+def blindspot_warning_active(value: int) -> bool:
+  return int(value) in (1, 2)
+
+
 class CarState(CarStateBase, CarStateExt):
   def __init__(self, CP, CP_SP):
     CarStateBase.__init__(self, CP, CP_SP)
@@ -155,8 +159,8 @@ class CarState(CarStateBase, CarStateExt):
     ret.seatbeltUnlatched = cp_party.vl["UI_warning"]["buckleStatus"] != 1
 
     # Blindspot
-    ret.leftBlindspot = cp_ap_party.vl["DAS_status"]["DAS_blindSpotRearLeft"] != 0
-    ret.rightBlindspot = cp_ap_party.vl["DAS_status"]["DAS_blindSpotRearRight"] != 0
+    ret.leftBlindspot = blindspot_warning_active(cp_ap_party.vl["DAS_status"]["DAS_blindSpotRearLeft"])
+    ret.rightBlindspot = blindspot_warning_active(cp_ap_party.vl["DAS_status"]["DAS_blindSpotRearRight"])
 
     # AEB
     ret.stockAeb = cp_ap_party.vl["DAS_control"]["DAS_aebEvent"] == 1
