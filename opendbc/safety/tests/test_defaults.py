@@ -34,6 +34,56 @@ class TestSilent(TestNoOutput):
     self.safety.init_tests()
 
 
+class TestNoOutputAmbient(common.SafetyTest):
+  TX_MSGS = []
+  FWD_BUS_LOOKUP = {}
+  TEMPLATE = bytes.fromhex("0bff804064f801")
+  LEFT = bytes.fromhex("03ff000064a800")
+  RIGHT = bytes.fromhex("03ff0000645001")
+
+  def setUp(self):
+    self.safety = libsafety_py.libsafety
+    self.safety.set_safety_hooks(CarParams.SafetyModel.noOutput, 1)
+    self.safety.init_tests()
+    self.safety.set_timer(100)
+
+  def ready(self):
+    self._rx(common.make_msg(1, 0x679, 7, self.TEMPLATE))
+
+  def test_fixed_red_left_and_right(self):
+    for frame in (self.LEFT, self.RIGHT):
+      self.setUp()
+      self.ready()
+      self.assertTrue(self._tx(common.make_msg(1, 0x679, 7, frame)))
+
+  def test_requires_fresh_vehicle_template(self):
+    self.assertFalse(self._tx(common.make_msg(1, 0x679, 7, self.LEFT)))
+    self.setUp()
+    self.ready()
+    self.safety.set_timer(1000101)
+    self.assertFalse(self._tx(common.make_msg(1, 0x679, 7, self.LEFT)))
+
+  def test_rejects_every_other_shape_and_payload(self):
+    self.ready()
+    self.assertFalse(self._tx(common.make_msg(0, 0x679, 7, self.LEFT)))
+    self.assertFalse(self._tx(common.make_msg(1, 0x679, 8, self.LEFT + b"\x00")))
+    self.assertFalse(self._tx(common.make_msg(1, 0x678, 7, self.LEFT)))
+    for index in range(7):
+      frame = bytearray(self.LEFT)
+      frame[index] ^= 1
+      self.assertFalse(self._tx(common.make_msg(1, 0x679, 7, frame)), index)
+    self.assertTrue(self._tx(common.make_msg(1, 0x679, 7, self.LEFT)))
+
+  def test_three_second_thirty_frame_cap(self):
+    for index in range(30):
+      self.safety.set_timer(100 + index * 100000)
+      self.ready()
+      self.assertTrue(self._tx(common.make_msg(1, 0x679, 7, self.LEFT)))
+    self.safety.set_timer(3000100)
+    self.ready()
+    self.assertFalse(self._tx(common.make_msg(1, 0x679, 7, self.LEFT)))
+
+
 class TestAllOutput(TestDefaultRxHookBase):
   # Allow all messages
   TX_MSGS = [[addr, bus] for addr in common.SafetyTest.SCANNED_ADDRS

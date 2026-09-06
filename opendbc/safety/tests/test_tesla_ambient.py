@@ -56,11 +56,11 @@ class TestTeslaAmbientSafety(unittest.TestCase):
       self.assertFalse(self.tx(data), (index, mask))
     self.assertTrue(self.tx(self.LEFT))
 
-  def test_park_and_zero_speed_required(self):
+  def test_gear_and_speed_do_not_gate_accessory_light(self):
     for gear, speed in ((4, 0), (3, 0), (2, 0), (1, 1), (1, -1)):
       self.setUp()
       self.ready(gear, speed)
-      self.assertFalse(self.tx(self.LEFT))
+      self.assertTrue(self.tx(self.LEFT))
 
   def test_rate_limit_and_rearm(self):
     self.ready()
@@ -71,10 +71,10 @@ class TestTeslaAmbientSafety(unittest.TestCase):
     self.ready()
     self.assertTrue(self.tx(self.RIGHT))
 
-  def test_controls_active_or_vehicle_bus_missing(self):
+  def test_controls_active_allowed_but_vehicle_bus_required(self):
     self.ready()
     self.safety.set_controls_allowed(True)
-    self.assertFalse(self.tx(self.LEFT))
+    self.assertTrue(self.tx(self.LEFT))
     self.safety.set_controls_allowed(False)
     self.safety.set_current_safety_param_sp(0)
     self.safety.set_safety_hooks(CarParams.SafetyModel.tesla, 0)
@@ -97,10 +97,10 @@ class TestTeslaAmbientSafety(unittest.TestCase):
     self.ready()
     self.assertTrue(self.tx(self.RIGHT))
 
-  def test_corrupt_gear_cannot_arm_test(self):
+  def test_corrupt_gear_does_not_gate_accessory_light(self):
     self.ready(gear=4)
     self.rx(0x118, 0, bytes.fromhex("0000200000000000"))
-    self.assertFalse(self.tx(self.LEFT))
+    self.assertTrue(self.tx(self.LEFT))
 
   def test_bad_template_sources_cannot_arm_test(self):
     for bus in (0, 2):

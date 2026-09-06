@@ -452,10 +452,8 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
 
   if (msg->addr == 0x679U) {
     const uint32_t now = microsecond_timer_get();
-    const bool fresh = tesla_ambient_template_valid && tesla_ambient_park && tesla_ambient_stopped &&
-      (safety_get_ts_elapsed(now, tesla_ambient_template_ts) <= 1000000U) &&
-      (safety_get_ts_elapsed(now, tesla_ambient_gear_ts) <= 1000000U) &&
-      (safety_get_ts_elapsed(now, tesla_ambient_speed_ts) <= 1000000U);
+    const bool fresh = tesla_ambient_template_valid &&
+      (safety_get_ts_elapsed(now, tesla_ambient_template_ts) <= 1000000U);
     const bool target = (((msg->data[5] & 0xF8U) == 0xA8U) && ((msg->data[6] & 1U) == 0U)) ||
                         (((msg->data[5] & 0xF8U) == 0x50U) && ((msg->data[6] & 1U) == 1U));
     const bool fixed_red = (msg->data[0] == ((tesla_ambient_template[0] & 1U) | 2U)) &&
@@ -468,7 +466,7 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
     const bool rate = !tesla_ambient_tx_valid || (safety_get_ts_elapsed(now, tesla_ambient_tx_ts) >= 80000U);
     const bool session = new_session || ((safety_get_ts_elapsed(now, tesla_ambient_session_ts) < 3000000U) &&
                                         (tesla_ambient_session_count < 30U));
-    if (!tesla_has_vehicle_bus || !fresh || !target || !fixed_red || !rate || !session || controls_allowed || controls_allowed_lateral) {
+    if (!tesla_has_vehicle_bus || !fresh || !target || !fixed_red || !rate || !session) {
       violation = true;
     }
     if (!violation) {
