@@ -47,6 +47,8 @@ class TeslaSpeedLimitController:
     self.last_current_display = None
     self.target_change_nanos = 0
     self.target_stabilizing = False
+    self.sp_enabled_prev = False
+    self.assist_enabled_prev = False
 
   def _reset_pending(self) -> None:
     self.pending_since_nanos = 0
@@ -58,8 +60,7 @@ class TeslaSpeedLimitController:
       log_dynamic_acc("speed_limit_controller", "manual_speed_override_cleared", reason=reason)
 
   def _reset(self) -> None:
-    # Transmission state can reset within a drive; driver override must survive
-    # until an explicit opposite-direction gesture or a new controller session.
+    # Target loss, braking and AP gating must not clear driver override.
     self._reset_pending()
     self.remaining_steps = 0
     self.feedback_blocked_signature = None
@@ -91,13 +92,30 @@ class TeslaSpeedLimitController:
 
   def update(self, CC, CS, now_nanos: int) -> list[CanData]:
     manual_changed, resume_changed = self._sync_manual_counters(CS)
+    sp_started = CC.enabled and not self.sp_enabled_prev
+    self.sp_enabled_prev = bool(CC.enabled)
+    # Keep user enablement separate from resolver validity: losing a limit is
+    # not a settings toggle and must never resume a manually paused controller.
+    assist_setting = getattr(CS, "tesla_speed_limit_assist_enabled", None)
+    assist_enabled = bool(assist_setting if assist_setting is not None else
+                          getattr(CS, "tesla_speed_limit_target_valid", False))
+    assist_started = assist_setting is not None and assist_enabled and not self.assist_enabled_prev
+    self.assist_enabled_prev = assist_enabled
+    if sp_started or assist_started:
+      self._clear_manual_override("sp_or_assist_enabled")
+      self._reset()
+      self.manual_resume_feedback_guard_until_nanos = now_nanos + FEEDBACK_TIMEOUT_NS
+
+    manual_eligible = (self.configured and CC.enabled and assist_enabled and
+                       CS.out.cruiseState.enabled and not CC.cruiseControl.cancel and
+                       not getattr(CS, "tesla_autopilot_active", False))
     # Consume the physical resume gesture before checking target validity.
     # A manual wheel change can temporarily make SLA publish an invalid target;
     # dropping the counter in that window would leave override latched forever.
     if resume_changed:
       self.manual_resume_feedback_guard_until_nanos = now_nanos + FEEDBACK_TIMEOUT_NS
       self._clear_manual_override("wheel_opposite_direction_gesture")
-    elif manual_changed:
+    elif manual_changed and manual_eligible and not sp_started and not assist_started:
       self.manual_resume_feedback_guard_until_nanos = 0
       if not self.manual_override_active:
         log_dynamic_acc("speed_limit_controller", "manual_speed_override")
@@ -106,7 +124,7 @@ class TeslaSpeedLimitController:
 
     # Observe physical gestures even while transmission is gated. AP owns the
     # wheel controls while active, so synthetic ticks remain prohibited there.
-    if (getattr(CS, "tesla_autopilot_active", False) or not self.configured or not CC.enabled or
+    if (getattr(CS, "tesla_autopilot_active", False) or not self.configured or not CC.enabled or not assist_enabled or
         CC.cruiseControl.cancel or not CS.out.cruiseState.enabled):
       self._reset()
       return []
