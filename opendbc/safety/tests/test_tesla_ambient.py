@@ -48,6 +48,21 @@ class TestTeslaAmbientSafety(unittest.TestCase):
       self.ready()
       self.assertTrue(self.tx(data))
 
+  def test_severity_alert_palette_and_brightness(self):
+    for targets in ((0xA8, 0), (0x50, 1), (0xF8, 1)):
+      for green, brightness in ((190, 50), (190, 90), (0, 50), (0, 90), (0, 0)):
+        self.setUp()
+        self.ready()
+        data = bytes((2, 255, green, 0, brightness, *targets))
+        self.assertTrue(self.tx(data), data.hex())
+        self.assertFalse(self.tx(data))  # Existing TX-rate gate still applies.
+
+  def test_other_palette_values_and_brightness_are_rejected(self):
+    for green, blue, brightness in ((190, 0, 100), (190, 0, 0), (190, 0, 49), (0, 0, 91), (0, 1, 50), (189, 0, 90)):
+      self.setUp()
+      self.ready()
+      self.assertFalse(self.tx(bytes((2, 255, green, blue, brightness, 0xA8, 0))))
+
   def test_no_fresh_vehicle_context(self):
     self.assertFalse(self.tx(self.LEFT))
     self.ready()
