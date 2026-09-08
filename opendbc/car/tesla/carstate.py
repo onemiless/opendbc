@@ -13,7 +13,12 @@ STEERING_KNUCKLE_ARM_LENGTH_M = 0.11
 
 
 def blindspot_warning_active(value: int) -> bool:
-  return int(value) in (1, 2)
+  return blindspot_warning_level(value) > 0
+
+
+def blindspot_warning_level(value: int) -> int:
+  value = int(value)
+  return value if value in (1, 2) else 0
 
 
 class CarState(CarStateBase, CarStateExt):
@@ -159,8 +164,10 @@ class CarState(CarStateBase, CarStateExt):
     ret.seatbeltUnlatched = cp_party.vl["UI_warning"]["buckleStatus"] != 1
 
     # Blindspot
-    ret.leftBlindspot = blindspot_warning_active(cp_ap_party.vl["DAS_status"]["DAS_blindSpotRearLeft"])
-    ret.rightBlindspot = blindspot_warning_active(cp_ap_party.vl["DAS_status"]["DAS_blindSpotRearRight"])
+    self.tesla_blindspot_left_level = blindspot_warning_level(cp_ap_party.vl["DAS_status"]["DAS_blindSpotRearLeft"])
+    self.tesla_blindspot_right_level = blindspot_warning_level(cp_ap_party.vl["DAS_status"]["DAS_blindSpotRearRight"])
+    ret.leftBlindspot = self.tesla_blindspot_left_level > 0
+    ret.rightBlindspot = self.tesla_blindspot_right_level > 0
 
     # AEB
     ret.stockAeb = cp_ap_party.vl["DAS_control"]["DAS_aebEvent"] == 1

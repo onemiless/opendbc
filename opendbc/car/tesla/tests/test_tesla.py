@@ -10,7 +10,7 @@ from opendbc.can import CANPacker
 from opendbc.car import Bus, gen_empty_fingerprint, structs
 from opendbc.car.structs import CarParams
 from opendbc.car.tesla.carcontroller import CarController
-from opendbc.car.tesla.carstate import CarState, blindspot_warning_active
+from opendbc.car.tesla.carstate import CarState, blindspot_warning_active, blindspot_warning_level
 from opendbc.car.tesla.interface import CarInterface
 from opendbc.car.tesla.fingerprints import FW_VERSIONS
 from opendbc.car.tesla.radar_interface import RADAR_START_ADDR
@@ -34,6 +34,9 @@ class TestTeslaBlindspotState(unittest.TestCase):
     self.assertTrue(blindspot_warning_active(1))
     self.assertTrue(blindspot_warning_active(2))
     self.assertFalse(blindspot_warning_active(3))  # SNA is not an occupied blind spot.
+
+  def test_preserves_the_two_warning_levels(self):
+    self.assertEqual([blindspot_warning_level(value) for value in range(4)], [0, 1, 2, 0])
 
 
 class TestTeslaSccmLeftStalk(unittest.TestCase):
