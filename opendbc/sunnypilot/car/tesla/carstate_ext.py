@@ -4,6 +4,7 @@ Copyright (c) 2021-, Haibin Wen, sunnypilot, and a number of other contributors.
 This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 """
+from collections.abc import Mapping
 from enum import StrEnum
 import time
 
@@ -37,22 +38,6 @@ PLAN_STALE_S = 0.2
 LANE_CHANGE_STALE_S = 0.2
 LATERAL_STABLE_S = 1.0
 SPEED_AUTO_RESUME_GESTURE_NS = 1_500_000_000
-TESLA_ROAD_CONTEXT_STALE_NS = 1_000_000_000
-
-
-def publish_tesla_road_context(ret_sp: structs.CarStateSP, values: dict, timestamp_ns: int, now_ns: int) -> None:
-  """Publish OEM traffic-control data for visualization only.
-
-  This deliberately does not feed any control state machine. A missing or
-  stale frame is represented as unavailable so consumers can safely hide it.
-  """
-  context = ret_sp.teslaRoadContext
-  context.available = timestamp_ns > 0 and now_ns - timestamp_ns <= TESLA_ROAD_CONTEXT_STALE_NS
-  if context.available:
-    context.trafficLightColor = int(values["DAS_trafficLightColor"])
-    context.stopLineDistance = float(values["DAS_stopLineDist"])
-
-
 class TeslaLongitudinalSource(StrEnum):
   sp = "sp"
   dynamicStock = "dynamicStock"
@@ -80,7 +65,10 @@ class CarStateExt:
     self._dyn_debug_followup_frames = 0
     self._stock_counter_last = None
     self._init_longitudinal_override_state()
-    self._read_dyn_params()
+    self._config_initialized = False
+    self._dyn_enabled = self._ap_hybrid_enabled = self._ap_dynamic_long_enabled = False
+    self._dyn_blinker_to_sp_enabled = self._dyn_curve_to_sp_enabled = False
+    self._dyn_high, self._dyn_low = 80, 70
     self.tesla_speed_button_template = None
     self.tesla_speed_button_template_nanos = 0
     self.tesla_speed_limit_target = 0.0
@@ -203,29 +191,26 @@ class CarStateExt:
       flags |= TeslaFlagsSP.AP_HYBRID_STOCK_LATERAL_ACTIVE
     return flags
 
-  def _read_dyn_params(self):
-    """Read dynamic auto-stock params from Params storage."""
+  def update_config(self, config: Mapping[str, object]) -> None:
+    """Latch the parent adapter's explicit startup Params snapshot once."""
+    if self._config_initialized:
+      return
     try:
-      from openpilot.common.params import Params
-      p = Params()
-      self._dyn_enabled = p.get_bool("DynamicAutoStock") and bool(self.CP_SP.flags & TeslaFlagsSP.DYNAMIC_AUTO_STOCK)
-      self._ap_hybrid_enabled = p.get_bool("TeslaApHybrid") and bool(self.CP_SP.flags & TeslaFlagsSP.AP_HYBRID)
-      self._ap_dynamic_long_enabled = (p.get_bool("TeslaDynamicApLongitudinal") and
+      self._dyn_enabled = int(config.get("DynamicAutoStock", 0) or 0) == 1 and bool(self.CP_SP.flags & TeslaFlagsSP.DYNAMIC_AUTO_STOCK)
+      self._ap_hybrid_enabled = int(config.get("TeslaApHybrid", 0) or 0) == 1 and bool(self.CP_SP.flags & TeslaFlagsSP.AP_HYBRID)
+      self._ap_dynamic_long_enabled = (int(config.get("TeslaDynamicApLongitudinal", 0) or 0) == 1 and
                                        bool(self.CP_SP.flags & TeslaFlagsSP.DYNAMIC_AP_LONGITUDINAL))
-      self._dyn_blinker_to_sp_enabled = p.get_bool("DynamicAutoStockBlinkerToSP")
-      self._dyn_curve_to_sp_enabled = p.get_bool("DynamicAutoStockCurveToSP")
-      self._dyn_high = max(0, min(155, int(p.get("DynamicAutoStockSpeedKph", return_default=True) or 80)))
-      self._dyn_low = max(0, min(155, int(p.get("DynamicAutoStockSpeedLowKph", return_default=True) or 70)))
-      self._touch_longitudinal_switch_enabled = p.get_bool("TeslaTouchLongitudinalSwitch")
-    except Exception:
-      self._dyn_enabled = False
-      self._ap_hybrid_enabled = False
-      self._ap_dynamic_long_enabled = False
-      self._dyn_blinker_to_sp_enabled = False
-      self._dyn_curve_to_sp_enabled = False
-      self._dyn_high = 80
-      self._dyn_low = 70
+      self._dyn_blinker_to_sp_enabled = int(config.get("DynamicAutoStockBlinkerToSP", 0) or 0) == 1
+      self._dyn_curve_to_sp_enabled = int(config.get("DynamicAutoStockCurveToSP", 0) or 0) == 1
+      self._dyn_high = max(0, min(155, int(config.get("DynamicAutoStockSpeedKph", 80) or 80)))
+      self._dyn_low = max(0, min(155, int(config.get("DynamicAutoStockSpeedLowKph", 70) or 70)))
+      self._touch_longitudinal_switch_enabled = int(config.get("TeslaTouchLongitudinalSwitch", 0) or 0) == 1
+    except (TypeError, ValueError):
+      self._dyn_enabled = self._ap_hybrid_enabled = self._ap_dynamic_long_enabled = False
+      self._dyn_blinker_to_sp_enabled = self._dyn_curve_to_sp_enabled = False
+      self._dyn_high, self._dyn_low = 80, 70
       self._touch_longitudinal_switch_enabled = False
+    self._config_initialized = True
     self._dyn_high = (self._dyn_high // 5) * 5
     self._dyn_low = (self._dyn_low // 5) * 5
     if self._dyn_high == 0:
@@ -714,9 +699,22 @@ class CarStateExt:
     autopilot_state = int(cp_ap_party.vl["DAS_status"]["DAS_autopilotState"])
     self._oem_auto_lane_change_state = int(cp_ap_party.vl["DAS_status"]["DAS_autoLaneChangeState"])
     status_counter = int(cp_ap_party.vl["DAS_status"]["DAS_statusCounter"])
-    ap_hybrid_session_active = self._update_ap_hybrid(
-      ret, autopilot_state, speed_kph, status_counter, self._lateral_control_ready,
-    )
+    if ret.accFaulted:
+      # A real cruise fault terminates ownership; the controller sends a zero
+      # cancel, never an active SP takeover from a stale carControl packet.
+      self._set_longitudinal_source(TeslaLongitudinalSource.sp)
+      self.tesla_ap_hybrid_active = False
+      self.tesla_stock_lateral_active = False
+      self._ap_hybrid_restore_source = TeslaLongitudinalSource.sp
+      self._ap_hybrid_exit_recovery_active = False
+      self._ap_dynamic_to_stock_frames = self._ap_dynamic_to_sp_frames = 0
+      self._dyn_enter_frames = self._dyn_exit_frames = 0
+      self._dyn_cooldown_frames = 200
+      ap_hybrid_session_active = False
+    else:
+      ap_hybrid_session_active = self._update_ap_hybrid(
+        ret, autopilot_state, speed_kph, status_counter, self._lateral_control_ready,
+      )
 
     # Process the real 4-finger edge before the dynamic state machine so a
     # manual decision always wins when both happen in the same update.
@@ -740,12 +738,12 @@ class CarStateExt:
 
       prev_touch_long = self.prev_touch_points_for_long
       self.prev_touch_points_for_long = self.active_touch_points
-      if (self._touch_longitudinal_switch_enabled and not ap_hybrid_session_active and
+      if (self._touch_longitudinal_switch_enabled and not ap_hybrid_session_active and not ret.accFaulted and
           prev_touch_long != 4 and self.active_touch_points == 4):
         self._toggle_stock_longitudinal_from_touch(ret, speed_kph)
 
     self._update_dynamic_manual_override(ret.cruiseState.enabled)
-    if self._dyn_enabled and not ap_hybrid_session_active:
+    if self._dyn_enabled and not ap_hybrid_session_active and not ret.accFaulted:
       self._dyn_cooldown_frames = max(0, self._dyn_cooldown_frames - 1)
       stock_counter = int(self.das_control["DAS_controlCounter"])
       stock_das_updated = self._stock_counter_last is None or stock_counter != self._stock_counter_last

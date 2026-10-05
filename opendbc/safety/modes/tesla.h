@@ -14,14 +14,11 @@
 
 #define TESLA_VEHICLE_BUS_ADDR_CHECK \
   {.msg = {{0x3DF, 1, 8, 2U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true, .ignore_frequency_check = true}, { 0 }, { 0 }}},    /* UI_status2 */ \
-  {.msg = {{0x3E9, 1, 8, 2U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true, .ignore_frequency_check = true}, { 0 }, { 0 }}},    /* DAS_bodyControls */ \
 
-#define TESLA_SPEED_BUTTON_VALIDATION_RX_CHECK \
+#define TESLA_SPEED_BUTTON_RX_CHECK \
   {.msg = {{0x3C2, 1, 8, 2U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true, .ignore_frequency_check = true}, { 0 }, { 0 }}},   /* VCLEFT_switchStatus */ \
 
 #define TESLA_STEERING_DISENGAGE_TORQUE 500 // cNm
-#define TESLA_TURN_SIGNAL_SESSION_TIMEOUT_US 60000000U
-#define TESLA_TURN_SIGNAL_SESSION_MAX_FRAMES 1200U
 
 static bool tesla_longitudinal = false;
 static bool tesla_fsd_14 = false;
@@ -55,32 +52,19 @@ static bool tesla_dynamic_auto_stock = false;
 static bool tesla_ap_hybrid_handoff = false;
 static bool tesla_ap_hybrid_lateral_handoff = false;
 static bool tesla_ap_stock_lateral_active = false;
-static bool tesla_turn_signal_validation = false;
-static bool tesla_speed_button_validation = false;
 static bool tesla_auto_speed_limit = false;
 static bool tesla_ars408_radar = false;
-static uint8_t tesla_turn_signal_active_state = 0U;
-static uint16_t tesla_turn_signal_active_count = 0U;
-static uint32_t tesla_turn_signal_session_timestamp = 0U;
-static bool tesla_turn_signal_session_timed_out = false;
-static bool tesla_turn_signal_rx_template_valid = false;
-static uint8_t tesla_turn_signal_rx_template[8] = {0U};
-static uint32_t tesla_turn_signal_rx_timestamp = 0U;
 static bool tesla_speed_button_rx_template_valid = false;
 static uint8_t tesla_speed_button_rx_template[8] = {0U};
 static uint32_t tesla_speed_button_rx_timestamp = 0U;
 static bool tesla_speed_button_last_tx_valid = false;
 static uint32_t tesla_speed_button_last_tx_timestamp = 0U;
 
-// Manual ambient-light test: fresh parked vehicle, one side, fixed red only.
+// Blindspot ambient lighting: fresh template, fixed red palette, bounded session.
 static uint8_t tesla_ambient_template[8] = {0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U};
 static bool tesla_ambient_template_valid = false;
-static bool tesla_ambient_park = false;
-static bool tesla_ambient_stopped = false;
 static bool tesla_ambient_tx_valid = false;
 static uint32_t tesla_ambient_template_ts = 0U;
-static uint32_t tesla_ambient_gear_ts = 0U;
-static uint32_t tesla_ambient_speed_ts = 0U;
 static uint32_t tesla_ambient_tx_ts = 0U;
 static uint32_t tesla_ambient_session_ts = 0U;
 static uint8_t tesla_ambient_session_count = 0U;
@@ -103,9 +87,6 @@ static uint8_t tesla_get_counter(const CANPacket_t *msg) {
   } else if (msg->addr == 0x370U) {
     // Signal: EPAS3S_sysStatusCounter
     cnt = msg->data[6] & 0x0FU;
-  } else if (msg->addr == 0x3E9U) {
-    // Signal: DAS_bodyControlsCounter
-    cnt = msg->data[6] >> 4;
   } else {
   }
   return cnt;
@@ -119,9 +100,6 @@ static int _tesla_get_checksum_byte(const int addr) {
   } else if (addr == 0x488) {
     // Signal: DAS_steeringControlChecksum
     checksum_byte = 3;
-  } else if (addr == 0x3E9) {
-    // Signal: DAS_bodyControlsChecksum
-    checksum_byte = 7;
   } else if ((addr == 0x257) || (addr == 0x145) || (addr == 0x286) || (addr == 0x311)) {
     // Signal: DI_speedChecksum, ESP_statusChecksum, DI_locStatusChecksum, UI_warningChecksum
     checksum_byte = 0;
@@ -191,14 +169,6 @@ static void tesla_ambient_rx_observer(const CANPacket_t *msg) {
       tesla_ambient_template_ts = microsecond_timer_get();
       tesla_ambient_template_valid = true;
     }
-    if ((GET_LEN(msg) == 8U) && (msg->bus == 0U) && (msg->addr == 0x118U)) {
-      uint8_t checksum = 0x19U;
-      for (uint8_t i = 1U; i < 8U; i++) {
-        checksum += msg->data[i];
-      }
-      tesla_ambient_park = (checksum == msg->data[0]) && (((msg->data[2] >> 5) & 7U) == 1U);
-      tesla_ambient_gear_ts = microsecond_timer_get();
-    }
   }
 }
 
@@ -223,8 +193,6 @@ static void tesla_rx_hook(const CANPacket_t *msg) {
 
     // Vehicle speed (DI_speed)
     if (msg->addr == 0x257U) {
-      tesla_ambient_stopped = ((((uint32_t)msg->data[2] << 4) | ((uint32_t)msg->data[1] >> 4)) == 500U);
-      tesla_ambient_speed_ts = microsecond_timer_get();
       // Vehicle speed: ((val * 0.08) - 40) / MS_TO_KPH
       float speed = ((((msg->data[2] << 4) | (msg->data[1] >> 4)) * 0.08) - 40.) * KPH_TO_MS;
       UPDATE_VEHICLE_SPEED(speed);
@@ -289,15 +257,6 @@ static void tesla_rx_hook(const CANPacket_t *msg) {
       }
       tesla_speed_button_rx_timestamp = microsecond_timer_get();
       tesla_speed_button_rx_template_valid = true;
-    }
-
-    if ((msg->addr == 0x3E9U) && (GET_LEN(msg) == 8U) &&
-        ((msg->data[1] & 0x03U) == 0U) && (tesla_compute_checksum(msg) == tesla_get_checksum(msg))) {
-      for (uint8_t i = 0U; i < 8U; i++) {
-        tesla_turn_signal_rx_template[i] = msg->data[i];
-      }
-      tesla_turn_signal_rx_timestamp = microsecond_timer_get();
-      tesla_turn_signal_rx_template_valid = true;
     }
 
     if (msg->addr == 0x3DFU) {
@@ -487,100 +446,25 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
   // Right scroll wheel: one signed tick cloned from a fresh vehicle RX frame.
   if (msg->addr == 0x3C2U) {
     const uint8_t right_scroll_ticks = msg->data[3] & 0x3FU;
-    const bool validation_tick_allowed = (right_scroll_ticks == 1U) || (right_scroll_ticks == 0x3FU);
-    bool validation_template_matches = (msg->data[3] & 0xC0U) == (tesla_speed_button_rx_template[3] & 0xC0U);
+    const bool tick_allowed = (right_scroll_ticks == 1U) || (right_scroll_ticks == 0x3FU);
+    bool template_matches = (msg->data[3] & 0xC0U) == (tesla_speed_button_rx_template[3] & 0xC0U);
     for (uint8_t i = 0U; i < 8U; i++) {
       if (i != 3U) {
-        validation_template_matches &= msg->data[i] == tesla_speed_button_rx_template[i];
+        template_matches &= msg->data[i] == tesla_speed_button_rx_template[i];
       }
     }
-    const bool validation_template_fresh = tesla_speed_button_rx_template_valid &&
+    const bool template_fresh = tesla_speed_button_rx_template_valid &&
       (safety_get_ts_elapsed(microsecond_timer_get(), tesla_speed_button_rx_timestamp) <= 1500000U);
-    const bool validation_rate_allowed = !tesla_speed_button_last_tx_valid ||
+    const bool rate_allowed = !tesla_speed_button_last_tx_valid ||
       (safety_get_ts_elapsed(microsecond_timer_get(), tesla_speed_button_last_tx_timestamp) >= 250000U);
-    const bool validation_mode_allowed = tesla_speed_button_validation;
     const bool automatic_mode_allowed = tesla_auto_speed_limit && controls_allowed;
-    const bool validation_button_valid = tesla_has_vehicle_bus && (validation_mode_allowed || automatic_mode_allowed) &&
-      validation_tick_allowed && validation_template_matches && validation_template_fresh && validation_rate_allowed;
-    if (!validation_button_valid) {
+    const bool button_valid = tesla_has_vehicle_bus && automatic_mode_allowed &&
+      tick_allowed && template_matches && template_fresh && rate_allowed;
+    if (!button_valid) {
       violation = true;
     } else {
       tesla_speed_button_last_tx_valid = true;
       tesla_speed_button_last_tx_timestamp = microsecond_timer_get();
-    }
-  }
-
-  // DAS body-control turn request cloned from a fresh OEM idle frame.
-  if (msg->addr == 0x3E9U) {
-    const uint32_t now = microsecond_timer_get();
-    const uint8_t turn_request = msg->data[1] & 0x03U;
-    const uint8_t turn_reason = (msg->data[2] >> 1) & 0x0FU;
-    const bool active_turn = (turn_request == 1U) || (turn_request == 2U);
-    const bool request_reason_valid = (active_turn && (turn_reason == 8U)) ||
-                                      ((turn_request == 3U) && (turn_reason == 4U));
-    bool validation_template_matches = (msg->data[0] == tesla_turn_signal_rx_template[0]) &&
-                                       ((msg->data[1] & 0xFCU) == (tesla_turn_signal_rx_template[1] & 0xFCU)) &&
-                                       ((msg->data[2] & 0xE1U) == (tesla_turn_signal_rx_template[2] & 0xE1U)) &&
-                                       (msg->data[3] == tesla_turn_signal_rx_template[3]) &&
-                                       (msg->data[4] == tesla_turn_signal_rx_template[4]) &&
-                                       (msg->data[5] == tesla_turn_signal_rx_template[5]) &&
-                                       ((msg->data[6] & 0x0FU) == (tesla_turn_signal_rx_template[6] & 0x0FU));
-    const uint8_t expected_counter = ((tesla_turn_signal_rx_template[6] >> 4) + 1U) & 0x0FU;
-    validation_template_matches &= (msg->data[6] >> 4) == expected_counter;
-    const bool validation_template_fresh = tesla_turn_signal_rx_template_valid &&
-      (safety_get_ts_elapsed(now, tesla_turn_signal_rx_timestamp) <= 1500000U);
-    if ((tesla_turn_signal_active_state != 0U) &&
-        (safety_get_ts_elapsed(now, tesla_turn_signal_session_timestamp) > TESLA_TURN_SIGNAL_SESSION_TIMEOUT_US)) {
-      tesla_turn_signal_session_timed_out = true;
-    }
-    const bool transition_valid = active_turn ?
-      (((tesla_turn_signal_active_state == 0U) && !tesla_turn_signal_session_timed_out) ||
-       ((tesla_turn_signal_active_state == turn_request) && !tesla_turn_signal_session_timed_out &&
-        (tesla_turn_signal_active_count < TESLA_TURN_SIGNAL_SESSION_MAX_FRAMES))) :
-      (tesla_turn_signal_active_state != 0U);
-    const bool checksum_valid = tesla_compute_checksum(msg) == tesla_get_checksum(msg);
-    const bool valid = tesla_has_vehicle_bus && tesla_turn_signal_validation && request_reason_valid &&
-                       validation_template_matches && validation_template_fresh && transition_valid && checksum_valid;
-    if (!valid) {
-      violation = true;
-    } else if (active_turn) {
-      if (tesla_turn_signal_active_state == 0U) {
-        tesla_turn_signal_session_timestamp = now;
-      }
-      tesla_turn_signal_active_state = turn_request;
-      tesla_turn_signal_active_count++;
-    } else {
-      tesla_turn_signal_active_state = 0U;
-      tesla_turn_signal_active_count = 0U;
-      tesla_turn_signal_session_timestamp = 0U;
-      tesla_turn_signal_session_timed_out = false;
-    }
-    // Every validation TX consumes exactly one OEM template. A subsequent
-    // action or cancel must wait for another real vehicle frame.
-    if (valid) {
-      tesla_turn_signal_rx_template_valid = false;
-    }
-  }
-
-  // Extra TX messages: basic safety checks
-  if (msg->addr == 0x370U) {
-    // Nag killer echo: verify checksum
-    uint8_t chksum = tesla_compute_checksum(msg);
-    if (chksum != tesla_get_checksum(msg)) {
-      violation = true;
-    }
-  }
-  if (msg->addr == 0x399U) {
-    // ISA speed chime: verify checksum
-    uint8_t chksum = tesla_compute_checksum(msg);
-    if (chksum != tesla_get_checksum(msg)) {
-      violation = true;
-    }
-  }
-  if (msg->addr == 0x082U) {
-    // Precondition: only allow byte0 = 0x05
-    if ((msg->data[0] & 0x05U) != 0x05U) {
-      violation = true;
     }
   }
 
@@ -648,39 +532,24 @@ static safety_config tesla_init(uint16_t param) {
     {0x488, 0, 4, .check_relay = true, .disable_static_blocking = true},   // DAS_steeringControl
     {0x2b9, 0, 8, .check_relay = false},                                   // DAS_control (for cancel)
     {0x27D, 0, 3, .check_relay = true, .disable_static_blocking = true},   // APS_eacMonitor
-    {0x082, 0, 8, .check_relay = false, .disable_static_blocking = true},  // UI_tripPlanning (precondition)
-    {0x3FD, 0, 8, .check_relay = false, .disable_static_blocking = true},  // UI_autopilotControl (FSD unlock)
-    {0x370, 0, 8, .check_relay = false, .disable_static_blocking = true},  // EPAS3S_sysStatus (nag killer)
-    {0x399, 0, 8, .check_relay = false, .disable_static_blocking = true},  // ISA speed chime suppress
-    {0x3E9, 1, 8, .check_relay = false, .disable_static_blocking = true},  // DAS_bodyControls (validation only)
-    {0x3C2, 1, 8, .check_relay = false, .disable_static_blocking = true},  // VCLEFT_switchStatus (validation only)
-    {0x679, 1, 7, .check_relay = false, .disable_static_blocking = true}, // Fixed red ambient test, parked only
+    {0x3C2, 1, 8, .check_relay = false, .disable_static_blocking = true},  // VCLEFT_switchStatus (automatic speed limit)
+    {0x679, 1, 7, .check_relay = false, .disable_static_blocking = true}, // Bounded blindspot ambient lighting
   };
 
   static const CanMsg TESLA_M3_Y_LONG_TX_MSGS[] = {
     {0x488, 0, 4, .check_relay = true, .disable_static_blocking = true},  // DAS_steeringControl
     {0x2b9, 0, 8, .check_relay = true, .disable_static_blocking = true},  // DAS_control
     {0x27D, 0, 3, .check_relay = true, .disable_static_blocking = true},  // APS_eacMonitor
-    {0x082, 0, 8, .check_relay = false, .disable_static_blocking = true}, // UI_tripPlanning (precondition)
-    {0x3FD, 0, 8, .check_relay = false, .disable_static_blocking = true}, // UI_autopilotControl (FSD unlock)
-    {0x370, 0, 8, .check_relay = false, .disable_static_blocking = true}, // EPAS3S_sysStatus (nag killer)
-    {0x399, 0, 8, .check_relay = false, .disable_static_blocking = true}, // ISA speed chime suppress
-    {0x3E9, 1, 8, .check_relay = false, .disable_static_blocking = true}, // DAS_bodyControls (validation only)
-    {0x3C2, 1, 8, .check_relay = false, .disable_static_blocking = true}, // VCLEFT_switchStatus (validation only)
-    {0x679, 1, 7, .check_relay = false, .disable_static_blocking = true}, // Fixed red ambient test, parked only
+    {0x3C2, 1, 8, .check_relay = false, .disable_static_blocking = true}, // VCLEFT_switchStatus (automatic speed limit)
+    {0x679, 1, 7, .check_relay = false, .disable_static_blocking = true}, // Bounded blindspot ambient lighting
   };
 
   static const CanMsg TESLA_M3_Y_ARS408_TX_MSGS[] = {
     {0x488, 0, 4, .check_relay = true, .disable_static_blocking = true},
     {0x2b9, 0, 8, .check_relay = false},
     {0x27D, 0, 3, .check_relay = true, .disable_static_blocking = true},
-    {0x082, 0, 8, .check_relay = false, .disable_static_blocking = true},
-    {0x3FD, 0, 8, .check_relay = false, .disable_static_blocking = true},
-    {0x370, 0, 8, .check_relay = false, .disable_static_blocking = true},
-    {0x399, 0, 8, .check_relay = false, .disable_static_blocking = true},
-    {0x3E9, 1, 8, .check_relay = false, .disable_static_blocking = true},
     {0x3C2, 1, 8, .check_relay = false, .disable_static_blocking = true},
-    {0x679, 1, 7, .check_relay = false, .disable_static_blocking = true}, // Fixed red ambient test, parked only
+    {0x679, 1, 7, .check_relay = false, .disable_static_blocking = true}, // Bounded blindspot ambient lighting
     {0x300, 1, 2, .check_relay = false, .disable_static_blocking = true},
     {0x301, 1, 2, .check_relay = false, .disable_static_blocking = true},
   };
@@ -689,13 +558,8 @@ static safety_config tesla_init(uint16_t param) {
     {0x488, 0, 4, .check_relay = true, .disable_static_blocking = true},
     {0x2b9, 0, 8, .check_relay = true, .disable_static_blocking = true},
     {0x27D, 0, 3, .check_relay = true, .disable_static_blocking = true},
-    {0x082, 0, 8, .check_relay = false, .disable_static_blocking = true},
-    {0x3FD, 0, 8, .check_relay = false, .disable_static_blocking = true},
-    {0x370, 0, 8, .check_relay = false, .disable_static_blocking = true},
-    {0x399, 0, 8, .check_relay = false, .disable_static_blocking = true},
-    {0x3E9, 1, 8, .check_relay = false, .disable_static_blocking = true},
     {0x3C2, 1, 8, .check_relay = false, .disable_static_blocking = true},
-    {0x679, 1, 7, .check_relay = false, .disable_static_blocking = true}, // Fixed red ambient test, parked only
+    {0x679, 1, 7, .check_relay = false, .disable_static_blocking = true}, // Bounded blindspot ambient lighting
     {0x300, 1, 2, .check_relay = false, .disable_static_blocking = true},
     {0x301, 1, 2, .check_relay = false, .disable_static_blocking = true},
   };
@@ -714,8 +578,6 @@ static safety_config tesla_init(uint16_t param) {
   const uint16_t TESLA_PARAM_SP_DYNAMIC_AUTO_STOCK = 16;
   const uint16_t TESLA_PARAM_SP_AP_HYBRID_HANDOFF = 64;
   const uint16_t TESLA_PARAM_SP_AP_HYBRID_LATERAL_HANDOFF = 128;
-  const uint16_t TESLA_PARAM_SP_TURN_SIGNAL_VALIDATION = 256;
-  const uint16_t TESLA_PARAM_SP_SPEED_BUTTON_VALIDATION = 512;
   const uint16_t TESLA_PARAM_SP_AUTO_SPEED_LIMIT = 1024;
   const uint16_t TESLA_PARAM_SP_ARS408_RADAR = 2048;
 
@@ -732,18 +594,12 @@ static safety_config tesla_init(uint16_t param) {
   tesla_dynamic_auto_stock = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_DYNAMIC_AUTO_STOCK);
   tesla_ap_hybrid_handoff = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_AP_HYBRID_HANDOFF);
   tesla_ap_hybrid_lateral_handoff = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_AP_HYBRID_LATERAL_HANDOFF);
-  tesla_turn_signal_validation = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_TURN_SIGNAL_VALIDATION);
-  tesla_speed_button_validation = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_SPEED_BUTTON_VALIDATION);
   tesla_auto_speed_limit = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_AUTO_SPEED_LIMIT);
   tesla_ars408_radar = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_ARS408_RADAR);
 
   tesla_ambient_template_valid = false;
-  tesla_ambient_park = false;
-  tesla_ambient_stopped = false;
   tesla_ambient_tx_valid = false;
   tesla_ambient_template_ts = 0U;
-  tesla_ambient_gear_ts = 0U;
-  tesla_ambient_speed_ts = 0U;
   tesla_ambient_tx_ts = 0U;
   tesla_ambient_session_ts = 0U;
   tesla_ambient_session_count = 0U;
@@ -752,18 +608,11 @@ static safety_config tesla_init(uint16_t param) {
   tesla_stock_steering_control_prev = false;
   tesla_stock_longitudinal_active = false;
   tesla_ap_stock_lateral_active = false;
-  tesla_turn_signal_active_state = 0U;
-  tesla_turn_signal_active_count = 0U;
-  tesla_turn_signal_session_timestamp = 0U;
-  tesla_turn_signal_session_timed_out = false;
-  tesla_turn_signal_rx_template_valid = false;
-  tesla_turn_signal_rx_timestamp = 0U;
   tesla_speed_button_rx_template_valid = false;
   tesla_speed_button_rx_timestamp = 0U;
   tesla_speed_button_last_tx_valid = false;
   tesla_speed_button_last_tx_timestamp = 0U;
   for (uint8_t i = 0U; i < 8U; i++) {
-    tesla_turn_signal_rx_template[i] = 0U;
     tesla_speed_button_rx_template[i] = 0U;
   }
   // we need to assume Autopark/Summon on startup since DI_state is a low freq msg.
@@ -780,15 +629,15 @@ static safety_config tesla_init(uint16_t param) {
     TESLA_VEHICLE_BUS_ADDR_CHECK
   };
 
-  static RxCheck tesla_model3_y_speed_button_validation_rx_checks[] = {
+  static RxCheck tesla_model3_y_speed_button_rx_checks[] = {
     TESLA_COMMON_RX_CHECKS
-    TESLA_SPEED_BUTTON_VALIDATION_RX_CHECK
+    TESLA_SPEED_BUTTON_RX_CHECK
   };
 
-  static RxCheck tesla_model3_y_vehicle_bus_speed_button_validation_rx_checks[] = {
+  static RxCheck tesla_model3_y_vehicle_bus_speed_button_rx_checks[] = {
     TESLA_COMMON_RX_CHECKS
     TESLA_VEHICLE_BUS_ADDR_CHECK
-    TESLA_SPEED_BUTTON_VALIDATION_RX_CHECK
+    TESLA_SPEED_BUTTON_RX_CHECK
   };
 
   safety_config ret;
@@ -802,10 +651,10 @@ static safety_config tesla_init(uint16_t param) {
     SET_TX_MSGS(TESLA_M3_Y_TX_MSGS, ret);
   }
 
-  if (tesla_has_vehicle_bus && (tesla_speed_button_validation || tesla_auto_speed_limit)) {
-    SET_RX_CHECKS(tesla_model3_y_vehicle_bus_speed_button_validation_rx_checks, ret);
-  } else if (tesla_speed_button_validation || tesla_auto_speed_limit) {
-    SET_RX_CHECKS(tesla_model3_y_speed_button_validation_rx_checks, ret);
+  if (tesla_has_vehicle_bus && tesla_auto_speed_limit) {
+    SET_RX_CHECKS(tesla_model3_y_vehicle_bus_speed_button_rx_checks, ret);
+  } else if (tesla_auto_speed_limit) {
+    SET_RX_CHECKS(tesla_model3_y_speed_button_rx_checks, ret);
   } else if (tesla_has_vehicle_bus) {
     SET_RX_CHECKS(tesla_model3_y_vehicle_bus_rx_checks, ret);
   } else {

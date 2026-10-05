@@ -14,15 +14,13 @@ from opendbc.car.tesla.carstate import CarState, blindspot_warning_active, blind
 from opendbc.car.tesla.interface import CarInterface
 from opendbc.car.tesla.fingerprints import FW_VERSIONS
 from opendbc.car.tesla.radar_interface import RADAR_START_ADDR
-from opendbc.car.tesla.teslacan import TeslaCAN, create_sccm_left_stalk
-from opendbc.car.tesla.values import CANBUS, CAR, FSD_14_FW, TeslaFlags, TeslaSafetyFlags
+from opendbc.car.tesla.teslacan import TeslaCAN
+from opendbc.car.tesla.values import CAR, FSD_14_FW, TeslaFlags, TeslaSafetyFlags
 from opendbc.sunnypilot.car.tesla.carstate_ext import (AP_HYBRID_EXIT_RECOVERY_CONFIRM_SAMPLES, CarStateExt,
-                                                        TeslaLongitudinalSource, publish_tesla_road_context)
+                                                        TeslaLongitudinalSource)
 from opendbc.sunnypilot.car.tesla import dynamic_acc_debug
 from opendbc.sunnypilot.car.interfaces import (_initialize_tesla_ap_hybrid, _initialize_tesla_auto_speed_limit,
-                                               _initialize_tesla_dynamic_auto_stock,
-                                               _initialize_tesla_speed_button_validation,
-                                               _initialize_tesla_turn_signal_validation)
+                                               _initialize_tesla_dynamic_auto_stock)
 from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP, TeslaSafetyFlagsSP
 
 Ecu = CarParams.Ecu
@@ -38,28 +36,6 @@ class TestTeslaBlindspotState(unittest.TestCase):
   def test_preserves_the_two_warning_levels(self):
     self.assertEqual([blindspot_warning_level(value) for value in range(4)], [0, 1, 2, 0])
 
-
-class TestTeslaSccmLeftStalk(unittest.TestCase):
-  def test_matches_observed_vehicle_frames(self):
-    observed_frames = {
-      (0, 0): "9b000000",
-      (10, 2): "fe0a0200",  # right turn
-      (11, 2): "340b0200",
-      (4, 6): "f7040600",   # left turn
-      (5, 6): "a7050600",
-    }
-    for (counter, turn_state), expected in observed_frames.items():
-      with self.subTest(counter=counter, turn_state=turn_state):
-        msg = create_sccm_left_stalk(turn_state, counter)
-        self.assertEqual(msg.address, 0x249)
-        self.assertEqual(msg.src, CANBUS.vehicle)
-        self.assertEqual(msg.dat.hex(), expected)
-
-  def test_rejects_unvalidated_stalk_states(self):
-    for turn_state in (1, 3, 4, 5, 7, 8, 9):
-      with self.subTest(turn_state=turn_state):
-        with self.assertRaises(ValueError):
-          create_sccm_left_stalk(turn_state, 0)
 
 # Fields prefixed unknown_* we observe structurally but don't know the meaning of.
 # Only `platform` has evidence-backed semantic meaning (matches car_model in FW_VERSIONS).
@@ -171,13 +147,6 @@ class TestTeslaFingerprint(unittest.TestCase):
     CP_SP.flags = TeslaFlagsSP.HAS_VEHICLE_BUS
     assert Bus.adas in CarState.get_can_parsers(CP, CP_SP)
 
-  def test_road_context_uses_struct_state_until_capnp_conversion(self):
-    state = structs.CarStateSP()
-    publish_tesla_road_context(state, {"DAS_trafficLightColor": 2, "DAS_stopLineDist": 12.5}, 1_000, 1_100)
-    assert state.teslaRoadContext.available
-    assert state.teslaRoadContext.trafficLightColor == 2
-    assert state.teslaRoadContext.stopLineDistance == 12.5
-
   def test_no_radar_car(self):
     # Model X doesn't have radar DBC defined, should always be unavailable
     for radar in (True, False):
@@ -235,31 +204,6 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
     })
 
     self.assertEqual(TeslaSafetyFlagsSP.DYNAMIC_AUTO_STOCK, cp_sp.safetyParam)
-
-  def test_turn_signal_validation_initialization_requires_vehicle_bus(self):
-    cp = SimpleNamespace(brand="tesla")
-    cp_sp = SimpleNamespace(flags=0, safetyParam=0)
-    _initialize_tesla_turn_signal_validation(cp, cp_sp, {"TeslaTurnSignalValidation": "1"})
-    self.assertEqual(cp_sp.flags, 0)
-    self.assertEqual(cp_sp.safetyParam, 0)
-
-    cp_sp.flags = TeslaFlagsSP.HAS_VEHICLE_BUS
-    _initialize_tesla_turn_signal_validation(cp, cp_sp, {"TeslaTurnSignalValidation": "1"})
-    self.assertTrue(cp_sp.flags & TeslaFlagsSP.TURN_SIGNAL_VALIDATION)
-    self.assertTrue(cp_sp.safetyParam & TeslaSafetyFlagsSP.TURN_SIGNAL_VALIDATION)
-
-  def test_speed_button_validation_does_not_enable_icbm(self):
-    cp = SimpleNamespace(brand="tesla")
-    cp_sp = SimpleNamespace(flags=0, safetyParam=0, intelligentCruiseButtonManagementAvailable=False)
-    _initialize_tesla_speed_button_validation(cp, cp_sp, {"TeslaSpeedButtonValidation": "1"})
-    self.assertEqual(cp_sp.flags, 0)
-    self.assertEqual(cp_sp.safetyParam, 0)
-
-    cp_sp.flags = TeslaFlagsSP.HAS_VEHICLE_BUS
-    _initialize_tesla_speed_button_validation(cp, cp_sp, {"TeslaSpeedButtonValidation": "1"})
-    self.assertTrue(cp_sp.flags & TeslaFlagsSP.SPEED_BUTTON_VALIDATION)
-    self.assertTrue(cp_sp.safetyParam & TeslaSafetyFlagsSP.SPEED_BUTTON_VALIDATION)
-    self.assertFalse(cp_sp.intelligentCruiseButtonManagementAvailable)
 
   def test_auto_speed_limit_initialization_requires_vehicle_bus_and_sp_longitudinal(self):
     cp = SimpleNamespace(brand="tesla", openpilotLongitudinalControl=True)

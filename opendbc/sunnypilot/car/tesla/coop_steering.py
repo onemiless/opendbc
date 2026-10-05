@@ -37,12 +37,6 @@ STEER_OVERRIDE_TARGET_ANGLE_MAX = CarControllerParams.ANGLE_LIMITS.STEER_ANGLE_M
 STEER_OVERRIDE_DELTA_GAIN_LIMIT = 125 # deg/s/Nm
 STEER_OVERRIDE_DELTA_GAIN_LIMIT_CENTERING = CoopSteeringCarControllerParams.ANGLE_LIMITS.MAX_ANGLE_RATE / DT_LAT_CTRL / STEER_OVERRIDE_TORQUE_RANGE
 
-# model fighting mitigation
-STEER_DESIRED_LIMITER_ALLOW_SPEED = 6 # m/s - below this speed the desired angle limiter is active
-STEER_DESIRED_LIMITER_ACCEL = 100 # deg/s^2 when override angle ramp is active
-STEER_DESIRED_LIMITER_OVERRIDE_ACTIVE_COUNTER = 3.0 # second
-
-
 CoopSteeringDataSP = namedtuple("CoopSteeringDataSP",
                                 ["steeringAngleDeg", "lat_active"])
 
@@ -103,98 +97,18 @@ class SteerRateLimiter:
     return angle_lim
 
 
-class SteerJerkLimiter:
-  angle_cmd: float = 0.0
-  vel_cmd: float = 0.0
-  acc_cmd: float = 0.0
-
-  def reset(self, angle: float = 0.0) -> None:
-    self.angle_cmd = angle
-    self.vel_cmd = 0.0
-    self.acc_cmd = 0.0
-
-  def update(
-      self,
-      target_angle: float,
-      dt: float,
-      v_max: float,
-      a_max: float,
-      j_max: float,
-      eps: float = 1e-8,
-  ) -> float:
-    """
-    Advance the command by dt toward target_angle subject to limits.
-
-    Args:
-      target_angle: desired angle (same units as angle_cmd)
-      dt: timestep (s)
-      v_max: max velocity magnitude
-      a_max: max acceleration magnitude
-      j_max: max jerk magnitude (rate of change of acceleration)
-      eps: small tolerance to treat as zero
-    Returns:
-      The updated angle command.
-    """
-    err = target_angle - self.angle_cmd
-
-    if abs(err) < eps and abs(self.vel_cmd) < eps:
-      self.angle_cmd = target_angle
-      self.vel_cmd = 0.0
-      self.acc_cmd = 0.0
-      return self.angle_cmd
-
-    # braking distance (always >= 0)
-    bd = (self.vel_cmd * self.vel_cmd) / (2.0 * max(a_max, eps))
-
-    # pick desired acceleration sign
-    if abs(err) <= bd + 1e-12:
-      # brake
-      if abs(self.vel_cmd) > 1e-12:
-        desired_acc = -a_max if self.vel_cmd > 0 else a_max
-      else:
-        desired_acc = 0.0
-    else:
-      # accelerate toward target
-      desired_acc = a_max if err > 0 else -a_max
-
-    # jerk limit
-    max_acc_delta = j_max * dt
-    desired_acc = np.clip(desired_acc, self.acc_cmd - max_acc_delta, self.acc_cmd + max_acc_delta)
-
-    # integrate
-    self.acc_cmd = desired_acc
-    self.vel_cmd += self.acc_cmd * dt
-    self.vel_cmd = np.clip(self.vel_cmd, -v_max, v_max)
-    self.angle_cmd += self.vel_cmd * dt
-
-    # prevent crossing/overshoot
-    new_err = target_angle - self.angle_cmd
-    if not np.isclose(err, 0.0, atol=0.0):
-      crossed = (err > 0 and new_err <= 0) or (err < 0 and new_err >= 0)
-      if crossed:
-        self.angle_cmd = target_angle
-        self.vel_cmd = 0.0
-        self.acc_cmd = 0.0
-
-    return self.angle_cmd
-
-
 class CoopSteeringCarController:
   def __init__(self):
     self.apply_angle_last = 0
     self.coop_apply_angle_sat_last = 0
     self.angle_override = 0
-    self.override_active_counter = 0  # Counter for how many cycles torque is below threshold
     self.resume_rate_limiter_delta = SteerRateLimiter()
     self.resume_rate_limiter = SteerRateLimiter()
-    self.override_accel_rate_limiter = SteerJerkLimiter()
-    self.debug_angle_desired_limited = 0
 
   def reset_override_state(self, apply_angle: float) -> None:
     self.apply_angle_last = apply_angle
     self.angle_override = 0
     self.coop_apply_angle_sat_last = apply_angle
-    self.override_accel_rate_limiter.reset(apply_angle)
 
   def compute_override_targets(self, vEgo: float, steering_torque: float, VM: VehicleModel) -> tuple[float, float]:
     """Returns (angle_override_target, override_torque): driver's target angle and net torque above neutral."""
@@ -236,29 +150,6 @@ class CoopSteeringCarController:
       return angle_override
     return angle_override - apply_bounds(sat_error, abs(angle_override))
 
-  def overriding_steer_desired_accel_limit(self, apply_angle: float, vEgo: float, steeringTorque: float) -> float:
-    """
-    Acceleration rate limiter - limits acceleration but allows for quick deceleration (no overshoot)
-    """
-
-    if abs(steeringTorque) >= STEER_OVERRIDE_MIN_TORQUE:
-      self.override_active_counter = 0
-    else:
-      self.override_active_counter += DT_LAT_CTRL
-      self.override_active_counter = min(self.override_active_counter, STEER_DESIRED_LIMITER_OVERRIDE_ACTIVE_COUNTER)
-
-    max_angle_rate = CarControllerParams.ANGLE_LIMITS.MAX_ANGLE_RATE / DT_LAT_CTRL # MAX_ANGLE_RATE is per frame units so convert to real rate
-    # this ensures no acceleration limit when override is disabled:
-    max_angle_accel = max_angle_rate / DT_LAT_CTRL # ensures max deceleration
-    if vEgo < STEER_DESIRED_LIMITER_ALLOW_SPEED:
-      # Interpolate between STEER_DESIRED_LIMITER_ACCEL and max_angle_accel based on counter progress
-      max_angle_accel = np.interp(
-        self.override_active_counter,
-        [0, STEER_DESIRED_LIMITER_OVERRIDE_ACTIVE_COUNTER],
-        [STEER_DESIRED_LIMITER_ACCEL, max_angle_accel]
-      )
-    return self.override_accel_rate_limiter.update(apply_angle, DT_LAT_CTRL, max_angle_rate, max_angle_accel, 100_000.0) #, snap = False)
-
   def resume_steer_desired_rate_limit(self, lat_active: bool, apply_angle: float) -> float:
     """Limits steering wheel acceleration when resuming steering"""
     if not lat_active:
@@ -281,9 +172,6 @@ class CoopSteeringCarController:
     if not lat_active or not angle_coop_enabled:
       self.reset_override_state(apply_angle)
       return CoopSteeringDataSP(apply_angle, lat_active)
-
-    # apply_angle = self.overriding_steer_desired_accel_limit(apply_angle, CS.out.vEgo, CS.out.steeringTorque)
-    self.debug_angle_desired_limited = apply_angle #! debug
 
     apply_angle_step = apply_angle - self.apply_angle_last
     self.apply_angle_last = apply_angle

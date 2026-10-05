@@ -20,15 +20,9 @@ MSG_DAS_steeringControl = 0x488
 MSG_APS_eacMonitor = 0x27d
 MSG_DAS_Control = 0x2b9
 MSG_VCLEFT_SWITCH_STATUS = 0x3C2
-MSG_DAS_BODY_CONTROLS = 0x3E9
-MSG_UI_TRIP_PLANNING = 0x082
-MSG_UI_AUTOPILOT_CONTROL = 0x3FD
-MSG_EPAS3S_SYS_STATUS = 0x370
-MSG_ISA_CHIME_SUPPRESS = 0x399
 MSG_ARS408_SPEED = 0x300
 MSG_ARS408_YAW_RATE = 0x301
 OBSERVED_SPEED_WHEEL_IDLE = bytes.fromhex("010000c000000000")
-OBSERVED_BODY_CONTROLS_IDLE = bytes.fromhex("008802000000b026")
 
 
 def round_angle(apply_angle, can_offset=0):
@@ -44,9 +38,7 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
   RELAY_MALFUNCTION_ADDRS = {0: (MSG_DAS_steeringControl, MSG_APS_eacMonitor)}
   FWD_BLACKLISTED_ADDRS = {2: [MSG_DAS_steeringControl, MSG_APS_eacMonitor]}
   TX_MSGS = [[MSG_DAS_steeringControl, 0], [MSG_APS_eacMonitor, 0], [MSG_DAS_Control, 0],
-             [0x679, CANBUS.vehicle], [MSG_VCLEFT_SWITCH_STATUS, CANBUS.vehicle], [MSG_DAS_BODY_CONTROLS, CANBUS.vehicle],
-             [MSG_UI_TRIP_PLANNING, 0], [MSG_UI_AUTOPILOT_CONTROL, 0],
-             [MSG_EPAS3S_SYS_STATUS, 0], [MSG_ISA_CHIME_SUPPRESS, 0]]
+             [0x679, CANBUS.vehicle], [MSG_VCLEFT_SWITCH_STATUS, CANBUS.vehicle]]
 
   STANDSTILL_THRESHOLD = 0.1
   GAS_PRESSED_THRESHOLD = 3
@@ -162,27 +154,6 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
     payload[3] = (payload[3] & 0xC0) | (right_ticks & 0x3F)
     return libsafety_py.make_CANPacket(MSG_VCLEFT_SWITCH_STATUS, CANBUS.vehicle, payload)
 
-  @staticmethod
-  def _body_control_msg(turn_request=0, reason=0, counter=11, data=OBSERVED_BODY_CONTROLS_IDLE):
-    payload = bytearray(data)
-    payload[1] = (payload[1] & 0xFC) | turn_request
-    payload[2] = (payload[2] & 0xE1) | ((reason & 0xF) << 1)
-    payload[6] = (payload[6] & 0x0F) | ((counter & 0xF) << 4)
-    payload[7] = (0xE9 + 0x03 + sum(payload[:7])) & 0xFF
-    return libsafety_py.make_CANPacket(MSG_DAS_BODY_CONTROLS, CANBUS.vehicle, payload)
-
-  def _enable_turn_signal_validation(self):
-    self.addCleanup(self.safety.set_current_safety_param_sp, 0)
-    self.safety.set_current_safety_param_sp(TeslaSafetyFlagsSP.HAS_VEHICLE_BUS | TeslaSafetyFlagsSP.TURN_SIGNAL_VALIDATION)
-    self.safety.set_safety_hooks(CarParams.SafetyModel.tesla, self.SAFETY_PARAM)
-    self.safety.init_tests()
-
-  def _enable_speed_button_validation(self):
-    self.addCleanup(self.safety.set_current_safety_param_sp, 0)
-    self.safety.set_current_safety_param_sp(TeslaSafetyFlagsSP.HAS_VEHICLE_BUS | TeslaSafetyFlagsSP.SPEED_BUTTON_VALIDATION)
-    self.safety.set_safety_hooks(CarParams.SafetyModel.tesla, self.SAFETY_PARAM)
-    self.safety.init_tests()
-
   def _enable_auto_speed_limit(self):
     self.addCleanup(self.safety.set_current_safety_param_sp, 0)
     self.safety.set_current_safety_param_sp(TeslaSafetyFlagsSP.HAS_VEHICLE_BUS | TeslaSafetyFlagsSP.AUTO_SPEED_LIMIT)
@@ -244,127 +215,6 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
     self._enable_ars408_radar()
     for address, length in ((0x200, 8), (0x202, 5)):
       self.assertFalse(self._tx(libsafety_py.make_CANPacket(address, CANBUS.vehicle, b"\x00" * length)))
-
-  def test_turn_signal_validation_requires_flag(self):
-    self.assertFalse(self._tx(self._body_control_msg(1, 8, 12)))
-
-  def test_turn_signal_validation_replays_only_fresh_rx_template(self):
-    self._enable_turn_signal_validation()
-    self.assertFalse(self._tx(self._body_control_msg(1, 8, 12)))
-    self.assertTrue(self._rx(self._body_control_msg(0, 0, 11)))
-    self.assertTrue(self._tx(self._body_control_msg(1, 8, 12)))
-    self.assertFalse(self._tx(self._body_control_msg(2, 8, 12)))
-
-    self.assertTrue(self._rx(self._body_control_msg(0, 0, 12)))
-    self.assertTrue(self._tx(self._body_control_msg(3, 4, 13)))
-
-  def test_turn_signal_validation_allows_continuous_fresh_same_direction_frames(self):
-    self._enable_turn_signal_validation()
-    for index in range(20):
-      counter = (11 + index) & 0xF
-      self.assertTrue(self._rx(self._body_control_msg(0, 0, counter)))
-      self.assertTrue(self._tx(self._body_control_msg(1, 8, (counter + 1) & 0xF)))
-
-    # Cancellation resets the session and permits the other direction.
-    self.assertTrue(self._rx(self._body_control_msg(0, 0, 1)))
-    self.assertTrue(self._tx(self._body_control_msg(3, 4, 2)))
-    self.assertTrue(self._rx(self._body_control_msg(0, 0, 2)))
-    self.assertTrue(self._tx(self._body_control_msg(2, 8, 3)))
-
-  def test_turn_signal_validation_times_out_until_cancel(self):
-    self._enable_turn_signal_validation()
-    self.safety.set_timer(100)
-    self.assertTrue(self._rx(self._body_control_msg(0, 0, 11)))
-    self.assertTrue(self._tx(self._body_control_msg(1, 8, 12)))
-
-    self.safety.set_timer(59_000_000)
-    self.assertTrue(self._rx(self._body_control_msg(0, 0, 12)))
-    self.assertTrue(self._tx(self._body_control_msg(1, 8, 13)))
-
-    self.safety.set_timer(60_000_101)
-    self.assertTrue(self._rx(self._body_control_msg(0, 0, 13)))
-    self.assertFalse(self._tx(self._body_control_msg(1, 8, 14)))
-
-    self.assertTrue(self._rx(self._body_control_msg(0, 0, 14)))
-    self.assertTrue(self._tx(self._body_control_msg(3, 4, 15)))
-    self.assertTrue(self._rx(self._body_control_msg(0, 0, 15)))
-    self.assertTrue(self._tx(self._body_control_msg(2, 8, 0)))
-
-  def test_turn_signal_validation_has_independent_safety_frame_cap(self):
-    self._enable_turn_signal_validation()
-    for index in range(1200):
-      counter = index & 0xF
-      self.assertTrue(self._rx(self._body_control_msg(0, 0, counter)))
-      self.assertTrue(self._tx(self._body_control_msg(1, 8, (counter + 1) & 0xF)))
-
-    self.assertTrue(self._rx(self._body_control_msg(0, 0, 0)))
-    self.assertFalse(self._tx(self._body_control_msg(1, 8, 1)))
-    self.assertTrue(self._rx(self._body_control_msg(0, 0, 1)))
-    self.assertTrue(self._tx(self._body_control_msg(3, 4, 2)))
-
-  def test_turn_signal_validation_rejects_direction_change_without_cancel(self):
-    self._enable_turn_signal_validation()
-    self.assertTrue(self._rx(self._body_control_msg(0, 0, 11)))
-    self.assertTrue(self._tx(self._body_control_msg(1, 8, 12)))
-    self.assertTrue(self._rx(self._body_control_msg(0, 0, 12)))
-    self.assertFalse(self._tx(self._body_control_msg(2, 8, 13)))
-
-  def test_turn_signal_validation_rejects_mutated_fields_and_bad_checksum(self):
-    self._enable_turn_signal_validation()
-    self.assertTrue(self._rx(self._body_control_msg(0, 0, 11)))
-    mutated = self._body_control_msg(1, 8, 12)
-    mutated[0].data[4] ^= 1
-    mutated[0].data[7] = (0xE9 + 0x03 + sum(mutated[0].data[i] for i in range(7))) & 0xFF
-    self.assertFalse(self._tx(mutated))
-
-    bad_checksum = self._body_control_msg(1, 8, 12)
-    bad_checksum[0].data[7] ^= 0xFF
-    self.assertFalse(self._tx(bad_checksum))
-
-  def test_turn_signal_validation_rejects_stale_template(self):
-    self._enable_turn_signal_validation()
-    self.assertTrue(self._rx(self._body_control_msg(0, 0, 11)))
-    self.safety.set_timer(1_500_001)
-    self.assertFalse(self._tx(self._body_control_msg(1, 8, 12)))
-
-  def test_turn_signal_validation_allows_while_controls_allowed(self):
-    self._enable_turn_signal_validation()
-    self.assertTrue(self._rx(self._body_control_msg(0, 0, 11)))
-    self.safety.set_controls_allowed(True)
-    self.assertTrue(self._tx(self._body_control_msg(1, 8, 12)))
-
-  def test_speed_button_validation_replays_only_fresh_rx_template(self):
-    self._enable_speed_button_validation()
-    self.assertFalse(self._tx(self._speed_wheel_msg(1)))
-    self.assertTrue(self._rx(self._speed_wheel_msg(0)))
-    self.assertTrue(self._tx(self._speed_wheel_msg(1)))
-    self.assertFalse(self._tx(self._speed_wheel_msg(-1)))
-    self.safety.set_timer(250_001)
-    self.assertTrue(self._rx(self._speed_wheel_msg(0)))
-    self.assertTrue(self._tx(self._speed_wheel_msg(-1)))
-    self.safety.set_timer(1_750_002)
-    self.assertFalse(self._tx(self._speed_wheel_msg(1)))
-
-  def test_speed_button_validation_requires_vehicle_bus_flag(self):
-    self.addCleanup(self.safety.set_current_safety_param_sp, 0)
-    self.safety.set_current_safety_param_sp(TeslaSafetyFlagsSP.SPEED_BUTTON_VALIDATION)
-    self.safety.set_safety_hooks(CarParams.SafetyModel.tesla, self.SAFETY_PARAM)
-    self.safety.init_tests()
-    self.assertTrue(self._rx(self._speed_wheel_msg(0)))
-    self.assertFalse(self._tx(self._speed_wheel_msg(1)))
-
-  def test_speed_button_validation_rejects_other_field_changes(self):
-    self._enable_speed_button_validation()
-    self.assertTrue(self._rx(self._speed_wheel_msg(0)))
-    mutated = self._speed_wheel_msg(1)
-    mutated[0].data[4] ^= 1
-    self.assertFalse(self._tx(mutated))
-
-  def test_speed_button_validation_allows_while_controls_allowed(self):
-    self._enable_speed_button_validation()
-    self.assertTrue(self._rx(self._speed_wheel_msg(0)))
-    self.safety.set_controls_allowed(True)
-    self.assertTrue(self._tx(self._speed_wheel_msg(1)))
 
   def test_auto_speed_limit_requires_controls_allowed(self):
     self._enable_auto_speed_limit()

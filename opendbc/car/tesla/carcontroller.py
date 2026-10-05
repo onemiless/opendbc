@@ -29,6 +29,8 @@ class CarController(CarControllerBase):
     self.coop_steer = CoopSteeringCarController()
     self.speed_limit_controller = TeslaSpeedLimitController(CP_SP)
     self.apply_angle_last = 0
+    self.steering_angle_sent = 0.0
+    self.accel_sent = 0.0
     self.packer = CANPacker(dbc_names[Bus.party])
     self.tesla_can = TeslaCAN(CP, self.packer)
     self.ars408_transmitter = ARS408Transmitter(CP_SP)
@@ -64,12 +66,13 @@ class CarController(CarControllerBase):
 
     # Wait until the override condition clears before steering
     # Canceling is done on rising edge of CS.out.steeringDisengage and is handled generically with CC.cruiseControl.cancel
-    lat_active = CC.latActive and not CS.out.steeringDisengage
+    lat_active = CC.latActive and not CS.out.steeringDisengage and not CS.out.accFaulted
     stock_lateral = bool(getattr(CS, "tesla_stock_lateral_active", False))
     entering_stock_lateral = stock_lateral and not self.prev_stock_lateral
     leaving_stock_lateral = not stock_lateral and self.prev_stock_lateral
 
     if entering_stock_lateral:
+      self.steering_angle_sent = CS.out.steeringAngleDeg
       lateral_handoff_msg = self.tesla_can.create_stock_lateral_handoff(CS.out.steeringAngleDeg)
       can_sends.append(lateral_handoff_msg)
       self._log_lateral_transition("entering_stock_lateral", CC, CS, handoff_msg=lateral_handoff_msg)
@@ -83,7 +86,12 @@ class CarController(CarControllerBase):
       self.apply_angle_last = apply_steer_angle_limits_vm(actuators.steeringAngleDeg, self.apply_angle_last, CS.out.vEgoRaw, CS.out.steeringAngleDeg,
                                                           lat_active, CarControllerParams, self.VM)
 
-      can_sends.append(self.tesla_can.create_steering_control(*self.coop_steer.update(self.apply_angle_last, lat_active, self.CP_SP, CS, self.VM)))
+      steering_command = self.coop_steer.update(self.apply_angle_last, lat_active, self.CP_SP, CS, self.VM)
+      self.steering_angle_sent = steering_command.steeringAngleDeg
+      can_sends.append(self.tesla_can.create_steering_control(*steering_command))
+
+    if stock_lateral:
+      self.steering_angle_sent = CS.out.steeringAngleDeg
 
     if self.frame % 10 == 0:
       can_sends.append(self.tesla_can.create_steering_allowed())
@@ -93,6 +101,7 @@ class CarController(CarControllerBase):
       entering_stock = CS.tesla_stock_longitudinal_active and not self.prev_stock_longitudinal
       leaving_stock = not CS.tesla_stock_longitudinal_active and self.prev_stock_longitudinal
       if entering_stock:
+        self.accel_sent = 0.0  # No SP acceleration is transmitted while OEM owns longitudinal.
         # Safety consumes the marker as an internal handoff request; it is never
         # transmitted onto the vehicle bus.
         handoff_msg = self.tesla_can.create_stock_longitudinal_handoff(CS.das_control)
@@ -112,13 +121,16 @@ class CarController(CarControllerBase):
       if long_control_due or self.leaving_stock_pending:
         # SP mode sends OP's own DAS_control. Stock mode lets panda forward the OEM DAS_control.
         if not CS.tesla_stock_longitudinal_active:
+          long_active = CC.longActive and not CS.out.accFaulted
+          cancel = CC.cruiseControl.cancel or CS.out.accFaulted
           state, accel = self._longitudinal_state_accel(
-            self.leaving_stock_pending, self._cruise_enabled(CS), CC.longActive,
-            CC.cruiseControl.cancel, self._limited_sp_takeover_accel(CC.longActive, actuators.accel),
+            self.leaving_stock_pending, self._cruise_enabled(CS), long_active,
+            cancel, self._limited_sp_takeover_accel(long_active, actuators.accel),
           )
           cntr = self._next_long_control_counter(CS.das_control["DAS_controlCounter"], self.leaving_stock_pending)
-          long_msg = self.tesla_can.create_longitudinal_command(state, accel, cntr, CS.out.vEgo, CC.longActive, CS.cruise_override)
+          long_msg = self.tesla_can.create_longitudinal_command(state, accel, cntr, CS.out.vEgo, long_active, CS.cruise_override)
           can_sends.append(long_msg)
+          self.accel_sent = accel
           if self.leaving_stock_pending or self.dynamic_acc_debug_followup_frames > 0:
             self._log_longitudinal_transition("sp_command", CC, CS, state=state, accel=accel, counter=cntr, long_msg=long_msg)
           self.last_long_control_frame = self.frame
@@ -132,13 +144,12 @@ class CarController(CarControllerBase):
       if CC.cruiseControl.cancel:
         cntr = (CS.das_control["DAS_controlCounter"] + 1) % 8
         can_sends.append(self.tesla_can.create_longitudinal_command(13, 0, cntr, CS.out.vEgo, False, True))
+        self.accel_sent = 0.0
 
     # TODO: HUD control
     new_actuators = actuators.as_builder()
-    new_actuators.steeringAngleDeg = self.apply_angle_last
-    new_actuators.accel = self.coop_steer.coop_apply_angle_sat_last # debug
-    new_actuators.curvature = float(self.coop_steer.debug_angle_desired_limited) # debug
-    new_actuators.torque = float(self.coop_steer.angle_override) # debug
+    new_actuators.steeringAngleDeg = self.steering_angle_sent
+    new_actuators.accel = self.accel_sent
 
     self.prev_stock_longitudinal = CS.tesla_stock_longitudinal_active
     self.prev_stock_lateral = stock_lateral
@@ -153,11 +164,13 @@ class CarController(CarControllerBase):
 
   @staticmethod
   def _longitudinal_state_accel(leaving_stock, cruise_enabled, long_active, cancel, requested_accel):
-    if leaving_stock:
+    if cancel:
+      state = 13
+    elif leaving_stock:
       state = 4 if cruise_enabled else 13
     else:
-      state = 13 if cancel else 4
-    accel = float(np.clip(requested_accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX)) if long_active else 0.0
+      state = 4
+    accel = float(np.clip(requested_accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX)) if long_active and state != 13 else 0.0
     return state, accel
 
   @staticmethod

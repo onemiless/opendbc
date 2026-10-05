@@ -1,8 +1,10 @@
 import copy
+import math
 from opendbc.can import CANDefine, CANParser
 from opendbc.car import Bus, create_button_events, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.interfaces import CarStateBase
+from opendbc.car.vehicle_model import VehicleModel
 from opendbc.car.tesla.teslacan import get_steer_ctrl_type
 from opendbc.car.tesla.values import DBC, CANBUS, GEAR_MAP, STEER_DISENGAGE_THRESHOLD, STEER_THRESHOLD, TeslaFlags
 
@@ -26,6 +28,7 @@ class CarState(CarStateBase, CarStateExt):
     CarStateBase.__init__(self, CP, CP_SP)
     CarStateExt.__init__(self, CP, CP_SP)
     self.can_define = CANDefine(DBC[CP.carFingerprint][Bus.party])
+    self.VM = VehicleModel(CP)
     self.shifter_values = self.can_define.dv["DI_systemStatus"]["DI_gear"]
 
     self.summon = False
@@ -152,6 +155,11 @@ class CarState(CarStateBase, CarStateExt):
 
     # Gear
     ret.gearShifter = GEAR_MAP[self.can_define.dv["DI_systemStatus"]["DI_gear"].get(int(cp_party.vl["DI_systemStatus"]["DI_gear"]), "DI_GEAR_INVALID")]
+    # The Tesla PARTY DBC has a yaw quality flag but no numerical yaw signal.
+    # This is a VehicleModel estimate from measured steering/speed, not a CAN
+    # yaw measurement. Preserve reverse direction in the estimated motion.
+    yaw_speed = -abs(ret.vEgoRaw) if ret.gearShifter == structs.CarState.GearShifter.reverse else ret.vEgoRaw
+    ret.yawRate = 0.0 if ret.standstill else self.VM.yaw_rate(math.radians(ret.steeringAngleDeg), yaw_speed, 0.0)
 
     # Doors
     ret.doorOpen = cp_party.vl["UI_warning"]["anyDoorOpen"] == 1
