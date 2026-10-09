@@ -11,7 +11,7 @@ from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP, TeslaSafetyFlagsSP
 class CarInterface(CarInterfaceBase):
   CarState = CarState
   CarController = CarController
-  RadarInterface = RadarInterface
+  RadarInterface = staticmethod(RadarInterface)
 
   @staticmethod
   def _get_params(ret: structs.CarParams, candidate, fingerprint, car_fw, alpha_long, is_release, docs) -> structs.CarParams:

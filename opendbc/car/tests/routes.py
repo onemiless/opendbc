@@ -2,6 +2,7 @@ from typing import NamedTuple
 
 from opendbc.car.mock.values import CAR as MOCK
 from opendbc.car.toyota.values import CAR as TOYOTA
+from opendbc.car.tesla.values import CAR as TESLA
 from opendbc.car.values import Platform
 
 # FIXME: add routes for these cars
@@ -60,4 +61,9 @@ CarTestRoute("20ba9ade056a8c7b/2021-02-08--21-57-35", TOYOTA.TOYOTA_RAV4_PRIME),
 CarTestRoute("41ba5b181f29435d/00000001--e3ae76382f", TOYOTA.TOYOTA_RAV4_PRIME),  # SecOC longitudinal
 CarTestRoute("8bfb000e03b2a257/00000004--f9eee5f52e", TOYOTA.TOYOTA_SIENNA_4TH_GEN),  # SecOC
 CarTestRoute("0b54d0594d924cd9/00000057--b6206a3205", TOYOTA.TOYOTA_YARIS),  # SecOC
+
+  CarTestRoute("7dc058789994da80/00000112--adb970f6a8", TESLA.TESLA_MODEL_3),
+  CarTestRoute("c8a98e58647765ad/00000002--84e4746136", TESLA.TESLA_MODEL_Y),
+  CarTestRoute("2c912ca5de3b1ee9/0000025d--6eb6bcbca4", TESLA.TESLA_MODEL_Y, segment=4),
+  CarTestRoute("bdda168c0c35fad7/00000001--5c5a36ec06", TESLA.TESLA_MODEL_X), # openpilot longitudinal
 ]

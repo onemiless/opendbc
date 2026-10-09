@@ -8,6 +8,7 @@ from opendbc import DBC_PATH, get_generated_dbcs
 
 # TODO: these should just be passed in along with the DBC file
 from opendbc.car.toyota.toyotacan import toyota_checksum
+from opendbc.car.tesla.teslacan import tesla_checksum
 
 
 class SignalType:
@@ -157,6 +158,14 @@ class DBC:
 
 # ***** checksum functions *****
 
+def tesla_setup_signal(sig: Signal, dbc_name: str, line_num: int) -> None:
+  if sig.name.endswith("Counter"):
+    sig.type = SignalType.COUNTER
+  elif sig.name.endswith("Checksum"):
+    sig.type = SignalType.TESLA_CHECKSUM
+    sig.calc_checksum = tesla_checksum
+
+
 @dataclass
 class ChecksumState:
   checksum_type: int
@@ -167,6 +176,8 @@ class ChecksumState:
 def get_checksum_state(dbc_name: str) -> ChecksumState | None:
   if dbc_name.startswith(("toyota_", "lexus_")):
     return ChecksumState(SignalType.TOYOTA_CHECKSUM, toyota_checksum)
+  elif dbc_name.startswith("tesla_model3_party"):
+    return ChecksumState(SignalType.TESLA_CHECKSUM, tesla_checksum, tesla_setup_signal)
   return None
 
 
