@@ -55,7 +55,7 @@ static bool tesla_ap_stock_lateral_active = false;
 static bool tesla_auto_speed_limit = false;
 static bool tesla_ars408_radar = false;
 static bool tesla_speed_button_rx_template_valid = false;
-static uint8_t tesla_speed_button_rx_template[8] = {0U};
+static uint8_t tesla_speed_button_rx_template[8] = {0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U};
 static uint32_t tesla_speed_button_rx_timestamp = 0U;
 static bool tesla_speed_button_last_tx_valid = false;
 static uint32_t tesla_speed_button_last_tx_timestamp = 0U;
@@ -181,7 +181,7 @@ static void tesla_rx_hook(const CANPacket_t *msg) {
       update_sample(&angle_meas, angle_meas_new);
 
       const int hands_on_level = msg->data[4] >> 6;  // EPAS3S_handsOnLevel
-      const int torsion_bar_torque = (((msg->data[2] & 0x0FU) << 8) | msg->data[3]) - 2050;  // EPAS3S_torsionBarTorque in 0.01 Nm
+      const int torsion_bar_torque = (int)(((msg->data[2] & 0x0FU) << 8) | msg->data[3]) - 2050;  // EPAS3S_torsionBarTorque in 0.01 Nm
       const int eac_status = msg->data[6] >> 5;  // EPAS3S_eacStatus
       const int eac_error_code = msg->data[2] >> 4;  // EPAS3S_eacErrorCode
 
@@ -337,24 +337,25 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
     // It opens OEM steering forwarding and is never transmitted to the vehicle.
     if (tesla_ap_hybrid_lateral_handoff && (steer_control_type == 3)) {
       tesla_ap_stock_lateral_active = true;
-      return false;
-    }
-    lateral_takeover = tesla_ap_stock_lateral_active;
-
-    if (steer_angle_cmd_checks_vm(desired_angle, steer_control_enabled, TESLA_STEERING_LIMITS, TESLA_STEERING_PARAMS)) {
       violation = true;
-    }
+    } else {
+      lateral_takeover = tesla_ap_stock_lateral_active;
 
-    bool valid_steer_control_type = (steer_control_type == 0) ||  // NONE
-                                    (steer_control_type == angle_ctrl_type) ||  // ANGLE_CONTROL
-                                    (steer_control_type == lkas_ctrl_type);     // LANE_KEEP_ASSIST
-    if (!valid_steer_control_type) {
-      violation = true;
-    }
+      if (steer_angle_cmd_checks_vm(desired_angle, steer_control_enabled, TESLA_STEERING_LIMITS, TESLA_STEERING_PARAMS)) {
+        violation = true;
+      }
 
-    if (tesla_stock_steering_control) {
-      // Don't allow any steering commands when stock LKAS is active
-      violation = true;
+      bool valid_steer_control_type = (steer_control_type == 0) ||  // NONE
+                                      (steer_control_type == angle_ctrl_type) ||  // ANGLE_CONTROL
+                                      (steer_control_type == lkas_ctrl_type);     // LANE_KEEP_ASSIST
+      if (!valid_steer_control_type) {
+        violation = true;
+      }
+
+      if (tesla_stock_steering_control) {
+        // Don't allow any steering commands when stock LKAS is active
+        violation = true;
+      }
     }
   }
 
@@ -367,44 +368,45 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
     // atomically closes OEM forwarding before it is transmitted.
     if ((tesla_has_vehicle_bus || tesla_dynamic_auto_stock || tesla_ap_hybrid_handoff) && (aeb_event == 3)) {
       tesla_stock_longitudinal_active = true;
-      return false;
-    }
-    longitudinal_takeover = tesla_stock_longitudinal_active && (aeb_event == 0);
-
-    // No AEB events may be sent by openpilot
-    if (aeb_event != 0) {
       violation = true;
-    }
+    } else {
+      longitudinal_takeover = tesla_stock_longitudinal_active && (aeb_event == 0);
 
-    // Don't send long/cancel messages when the stock AEB system is active
-    if (tesla_stock_aeb) {
-      violation = true;
-    }
+      // No AEB events may be sent by openpilot
+      if (aeb_event != 0) {
+        violation = true;
+      }
 
-    int raw_accel_max = ((msg->data[6] & 0x1FU) << 4) | (msg->data[5] >> 4);
-    int raw_accel_min = ((msg->data[5] & 0x0FU) << 5) | (msg->data[4] >> 3);
-    int acc_state = msg->data[1] >> 4;
+      // Don't send long/cancel messages when the stock AEB system is active
+      if (tesla_stock_aeb) {
+        violation = true;
+      }
 
-    if (tesla_longitudinal) {
-      // Stock mode echoes Tesla's own DAS_control values via TX channel.
-      // These are inherently safe — skip accel checks so hard braking etc. passes.
-      if (!tesla_stock_longitudinal_active || longitudinal_takeover) {
-        // SP mode: OP's own DAS_control — enforce safety limits.
-        if ((raw_accel_max < TESLA_LONG_LIMITS.inactive_accel) && (raw_accel_min < TESLA_LONG_LIMITS.inactive_accel)) {
+      int raw_accel_max = ((msg->data[6] & 0x1FU) << 4) | (msg->data[5] >> 4);
+      int raw_accel_min = ((msg->data[5] & 0x0FU) << 5) | (msg->data[4] >> 3);
+      int acc_state = msg->data[1] >> 4;
+
+      if (tesla_longitudinal) {
+        // Stock mode echoes Tesla's own DAS_control values via TX channel.
+        // These are inherently safe — skip accel checks so hard braking etc. passes.
+        if (!tesla_stock_longitudinal_active || longitudinal_takeover) {
+          // SP mode: OP's own DAS_control — enforce safety limits.
+          if ((raw_accel_max < TESLA_LONG_LIMITS.inactive_accel) && (raw_accel_min < TESLA_LONG_LIMITS.inactive_accel)) {
+            violation = true;
+          }
+          violation |= longitudinal_accel_checks(raw_accel_max, TESLA_LONG_LIMITS);
+          violation |= longitudinal_accel_checks(raw_accel_min, TESLA_LONG_LIMITS);
+        }
+      } else {
+        // Can only send cancel longitudinal messages when not controlling longitudinal
+        if (acc_state != 13) {  // ACC_CANCEL_GENERIC_SILENT
           violation = true;
         }
-        violation |= longitudinal_accel_checks(raw_accel_max, TESLA_LONG_LIMITS);
-        violation |= longitudinal_accel_checks(raw_accel_min, TESLA_LONG_LIMITS);
-      }
-    } else {
-      // Can only send cancel longitudinal messages when not controlling longitudinal
-      if (acc_state != 13) {  // ACC_CANCEL_GENERIC_SILENT
-        violation = true;
-      }
 
-      // No actuation is allowed when not controlling longitudinal
-      if ((raw_accel_max != TESLA_LONG_LIMITS.inactive_accel) || (raw_accel_min != TESLA_LONG_LIMITS.inactive_accel)) {
-        violation = true;
+        // No actuation is allowed when not controlling longitudinal
+        if ((raw_accel_max != TESLA_LONG_LIMITS.inactive_accel) || (raw_accel_min != TESLA_LONG_LIMITS.inactive_accel)) {
+          violation = true;
+        }
       }
     }
   }
