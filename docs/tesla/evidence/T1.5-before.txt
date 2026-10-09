@@ -1,0 +1,91 @@
+..F..F..FF.                                                              [100%]
+=================================== FAILURES ===================================
+______________ TestNoOutputAmbient.test_fixed_red_left_and_right _______________
+
+self = <opendbc.safety.tests.test_defaults.TestNoOutputAmbient testMethod=test_fixed_red_left_and_right>
+
+    def test_fixed_red_left_and_right(self):
+      for frame in (self.LEFT, self.RIGHT):
+        self.setUp()
+        self.ready()
+>       self.assertTrue(self._tx(common.make_msg(1, 0x679, 7, frame)))
+E       AssertionError: False is not true
+
+opendbc/safety/tests/test_defaults.py:68: AssertionError
+________ TestNoOutputAmbient.test_rejects_every_other_shape_and_payload ________
+
+self = <opendbc.safety.tests.test_defaults.TestNoOutputAmbient testMethod=test_rejects_every_other_shape_and_payload>
+
+    def test_rejects_every_other_shape_and_payload(self):
+      self.ready()
+      self.assertFalse(self._tx(common.make_msg(0, 0x679, 7, self.LEFT)))
+      self.assertFalse(self._tx(common.make_msg(1, 0x679, 8, self.LEFT + b"\x00")))
+      self.assertFalse(self._tx(common.make_msg(1, 0x678, 7, self.LEFT)))
+      for index in range(7):
+        frame = bytearray(self.LEFT)
+        frame[index] ^= 1
+        self.assertFalse(self._tx(common.make_msg(1, 0x679, 7, frame)), index)
+>     self.assertTrue(self._tx(common.make_msg(1, 0x679, 7, self.LEFT)))
+E     AssertionError: False is not true
+
+opendbc/safety/tests/test_defaults.py:86: AssertionError
+____________ TestNoOutputAmbient.test_three_second_thirty_frame_cap ____________
+
+self = <opendbc.safety.tests.test_defaults.TestNoOutputAmbient testMethod=test_three_second_thirty_frame_cap>
+
+    def test_three_second_thirty_frame_cap(self):
+      for index in range(30):
+        self.safety.set_timer(100 + index * 100000)
+        self.ready()
+>       self.assertTrue(self._tx(common.make_msg(1, 0x679, 7, self.LEFT)))
+E       AssertionError: False is not true
+
+opendbc/safety/tests/test_defaults.py:92: AssertionError
+____________ TestNoOutputAmbient.test_tx_hook_on_wrong_safety_mode _____________
+
+self = <opendbc.safety.tests.test_defaults.TestNoOutputAmbient testMethod=test_tx_hook_on_wrong_safety_mode>
+
+    def test_tx_hook_on_wrong_safety_mode(self):
+      files = os.listdir(os.path.dirname(os.path.realpath(__file__)))
+      test_files = [f for f in files if f.startswith("test_") and f.endswith(".py")]
+    
+      current_test = self.__class__.__name__
+    
+      all_tx = []
+      for tf in test_files:
+>       test = importlib.import_module("opendbc.safety.tests."+tf[:-3])
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+opendbc/safety/tests/common.py:994: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+../../../.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+<frozen importlib._bootstrap>:1387: in _gcd_import
+    ???
+<frozen importlib._bootstrap>:1360: in _find_and_load
+    ???
+<frozen importlib._bootstrap>:1331: in _find_and_load_unlocked
+    ???
+<frozen importlib._bootstrap>:935: in _load_unlocked
+    ???
+../../../Desktop/mo-op/.venv/lib/python3.12/site-packages/_pytest/assertion/rewrite.py:188: in exec_module
+    exec(co, module.__dict__)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    #!/usr/bin/env python3
+    import random
+    import unittest
+    import numpy as np
+    
+    from opendbc.car.lateral import get_max_angle_delta_vm, get_max_angle_vm
+>   from opendbc.car.tesla.teslacan import get_steer_ctrl_type
+E   ModuleNotFoundError: No module named 'opendbc.car.tesla.teslacan'
+
+opendbc/safety/tests/test_tesla.py:7: ModuleNotFoundError
+=========================== short test summary info ============================
+FAILED opendbc/safety/tests/test_defaults.py::TestNoOutputAmbient::test_fixed_red_left_and_right
+FAILED opendbc/safety/tests/test_defaults.py::TestNoOutputAmbient::test_rejects_every_other_shape_and_payload
+FAILED opendbc/safety/tests/test_defaults.py::TestNoOutputAmbient::test_three_second_thirty_frame_cap
+FAILED opendbc/safety/tests/test_defaults.py::TestNoOutputAmbient::test_tx_hook_on_wrong_safety_mode
+4 failed, 7 passed, 35 deselected in 0.82s
