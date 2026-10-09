@@ -1,0 +1,62 @@
+.sssssss.......................................sssssss..........sssss [  3%]
+ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss [  7%]
+sss....s.....................sss................ [  9%]
+.s.........s......s.......................s........... [ 12%]
+..........sss.................s.........s. [ 14%]
+.....s.......................s.......................s [ 16%]
+ss..................s.........s..... [ 18%]
+.s..........................s.......................sss..................s.........s......s........... [ 23%]
+..................s.....................ss............................s......s [ 27%]
+..................ssssssssssssssssssssssssssssssssssssssssssssssssssssss [ 31%]
+ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss [ 34%]
+sssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss....s.. [ 38%]
+.........ss..................s..........s......s....s...................s........... [ 42%]
+ss..................s..........s......s....s....................s...........ss.. [ 46%]
+.................s...........s.... [ 48%]
+...s....s.....................s...........ss...................s...........s.......s... [ 52%]
+.s....................s...............ss..................s........s......s.s.s........ [ 56%]
+......s...............ss.............. [ 58%]
+.....s.........s.......s.s.s..............s...... [ 61%]
+.....ss..................s.... [ 62%]
+......s......s....s...................s...........ss..................s..........s......s....s....................s...........ss...................s...........s.......s [ 71%]
+....s.....................s...........ss...................s...........s.......s....s.. [ 75%]
+..............sssssssssssssssssssssssssssssssssssssssssssssssssssssss [ 78%]
+sssssssss.....s...........ss............ [ 80%]
+......s..........s......s....s.................... [ 83%]
+s...........ss..................s..........s......s....s....................s............. [ 87%]
+..ss..................s....... [ 89%]
+.s......s.s.s.........ssssssssssssssssssssssssssssssssssssss [ 92%]
+ssssssssssssssssssssssssss.....s...........ss..................s........s......s..s....... [ 96%]
+......s.s.........ss................ [ 98%]
+..s........s......s..s........                         [100%]
+=================================== FAILURES ===================================
+_ TestMisraMutation.test_misra_mutation (fn=None, rule=None, should_fail=False) _
+
+self = <test_mutation.TestMisraMutation testMethod=test_misra_mutation>
+
+    def test_misra_mutation(self):
+      for fn, rule, transform, should_fail in mutations:
+        with self.subTest(fn=fn, rule=rule, should_fail=should_fail):
+          with tempfile.TemporaryDirectory() as tmp:
+            shutil.copytree(ROOT, tmp, dirs_exist_ok=True,
+                            ignore=shutil.ignore_patterns('.venv', '.git', '*.ctu-info'))
+    
+            # apply patch
+            if fn is not None:
+              with open(os.path.join(tmp, fn), 'r+') as f:
+                content = f.read()
+                f.seek(0)
+                f.write(transform(content))
+    
+            # run test
+            r = subprocess.run(f"OPENDBC_ROOT={tmp} opendbc/safety/tests/misra/test_misra.sh",
+                               stdout=subprocess.PIPE, cwd=ROOT, shell=True, encoding='utf8')
+            print(r.stdout) # helpful for debugging failures
+            failed = r.returncode != 0
+>           assert failed == should_fail
+E           AssertionError: assert True == False
+
+opendbc/safety/tests/misra/test_mutation.py:69: AssertionError
+=========================== short test summary info ============================
+SUBFAILED(fn=None, rule=None, should_fail=False) opendbc/safety/tests/misra/test_mutation.py::TestMisraMutation::test_misra_mutation
+1 failed, 1455 passed, 579 skipped, 1037 subtests passed in 90.54s (0:01:30)

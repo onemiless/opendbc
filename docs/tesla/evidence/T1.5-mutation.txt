@@ -1,0 +1,75 @@
+
+MUTATION omit_enable
+..F..F..F..                                                              [100%]
+=================================== FAILURES ===================================
+______________ TestNoOutputAmbient.test_fixed_red_left_and_right _______________
+
+self = <opendbc.safety.tests.test_defaults.TestNoOutputAmbient testMethod=test_fixed_red_left_and_right>
+
+    def test_fixed_red_left_and_right(self):
+      for frame in (self.LEFT, self.RIGHT):
+        self.setUp()
+        self.ready()
+>       self.assertTrue(self._tx(common.make_msg(1, 0x679, 7, frame)))
+E       AssertionError: False is not true
+
+opendbc/safety/tests/test_defaults.py:68: AssertionError
+________ TestNoOutputAmbient.test_rejects_every_other_shape_and_payload ________
+
+self = <opendbc.safety.tests.test_defaults.TestNoOutputAmbient testMethod=test_rejects_every_other_shape_and_payload>
+
+    def test_rejects_every_other_shape_and_payload(self):
+      self.ready()
+      self.assertFalse(self._tx(common.make_msg(0, 0x679, 7, self.LEFT)))
+      self.assertFalse(self._tx(common.make_msg(1, 0x679, 8, self.LEFT + b"\x00")))
+      self.assertFalse(self._tx(common.make_msg(1, 0x678, 7, self.LEFT)))
+      for index in range(7):
+        frame = bytearray(self.LEFT)
+        frame[index] ^= 1
+        self.assertFalse(self._tx(common.make_msg(1, 0x679, 7, frame)), index)
+>     self.assertTrue(self._tx(common.make_msg(1, 0x679, 7, self.LEFT)))
+E     AssertionError: False is not true
+
+opendbc/safety/tests/test_defaults.py:86: AssertionError
+____________ TestNoOutputAmbient.test_three_second_thirty_frame_cap ____________
+
+self = <opendbc.safety.tests.test_defaults.TestNoOutputAmbient testMethod=test_three_second_thirty_frame_cap>
+
+    def test_three_second_thirty_frame_cap(self):
+      for index in range(30):
+        self.safety.set_timer(100 + index * 100000)
+        self.ready()
+>       self.assertTrue(self._tx(common.make_msg(1, 0x679, 7, self.LEFT)))
+E       AssertionError: False is not true
+
+opendbc/safety/tests/test_defaults.py:92: AssertionError
+=========================== short test summary info ============================
+FAILED opendbc/safety/tests/test_defaults.py::TestNoOutputAmbient::test_fixed_red_left_and_right
+FAILED opendbc/safety/tests/test_defaults.py::TestNoOutputAmbient::test_rejects_every_other_shape_and_payload
+FAILED opendbc/safety/tests/test_defaults.py::TestNoOutputAmbient::test_three_second_thirty_frame_cap
+3 failed, 8 passed, 35 deselected in 0.40s
+exit=1 (expected nonzero)
+
+MUTATION always_enable
+F..........                                                              [100%]
+=================================== FAILURES ===================================
+_________ TestNoOutputAmbient.test_ambient_disabled_for_default_param __________
+
+self = <opendbc.safety.tests.test_defaults.TestNoOutputAmbient testMethod=test_ambient_disabled_for_default_param>
+
+    def test_ambient_disabled_for_default_param(self):
+      self.safety.set_safety_hooks(CarParams.SafetyModel.noOutput, 0)
+      self.safety.init_tests()
+      self.safety.set_timer(100)
+      self.ready()
+>     self.assertFalse(self._tx(common.make_msg(1, 0x679, 7, self.LEFT)))
+E     AssertionError: True is not false
+
+opendbc/safety/tests/test_defaults.py:58: AssertionError
+=========================== short test summary info ============================
+FAILED opendbc/safety/tests/test_defaults.py::TestNoOutputAmbient::test_ambient_disabled_for_default_param
+1 failed, 10 passed, 35 deselected in 0.64s
+exit=1 (expected nonzero)
+...........                                                              [100%]
+11 passed, 35 deselected in 0.41s
+RESTORED exit=0

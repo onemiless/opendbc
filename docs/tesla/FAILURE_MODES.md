@@ -21,6 +21,6 @@ MISRA baseline passes. Imported source exposes five violations: local-only ambie
 TX table at file scope, partially explicit zero initializer, unsigned-to-signed
 subtraction, and two early returns in handoff markers. Corrections preserve
 rejection and state side effects: local static table, explicit eight zeros,
-cast the 12-bit torque to int before subtraction, and reject marker with an else
+store the 12-bit torque in a signed intermediate before subtraction, and reject marker with an else
 branch that skips all regular actuation checks. Existing handoff safety cases and
 ambient mutation tests must remain passing. These are documented source deviations.

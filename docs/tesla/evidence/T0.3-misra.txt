@@ -1,0 +1,46 @@
+Using CPython 3.12.13
+Creating virtual environment at: /Users/mile/work/tesla-port/opendbc/.baseline/.venv
+Resolved 33 packages in 856ms
+   Building opendbc @ file:///Users/mile/work/tesla-port/opendbc/.baseline
+      Built opendbc @ file:///Users/mile/work/tesla-port/opendbc/.baseline
+Prepared 1 package in 615ms
+Installed 31 packages in 177ms
+ + certifi==2026.7.22
+ + cffi==2.1.1
+ + charset-normalizer==3.4.9
+ + codespell==2.4.3
+ + colorlog==6.12.0
+ + comma-car-segments==0.1.0 (from https://huggingface.co/datasets/commaai/commaCarSegments/resolve/main/dist/comma_car_segments-0.1.0-py3-none-any.whl)
+ + coverage==7.15.4
+ + cppcheck==2.21.0 (from git+https://github.com/commaai/dependencies.git@b7253ddb101ed6add04fc2a2ce0688d5e21a55ee#subdirectory=cppcheck)
+ + cpplint==2.0.2
+ + gcovr==8.6
+ + idna==3.18
+ + inputs==0.5
+ + jinja2==3.1.6
+ + lefthook==2.1.10
+ + lxml==6.1.1
+ + markupsafe==3.0.3
+ + numpy==2.5.2
+ + opendbc==0.3.1 (from file:///Users/mile/work/tesla-port/opendbc/.baseline)
+ + pycapnp==2.2.4
+ + pycparser==3.0
+ + pycryptodome==3.23.0
+ + pygments==2.20.0
+ + requests==2.34.2
+ + ruff==0.16.2
+ + tqdm==4.70.0
+ + tree-sitter==0.26.0
+ + tree-sitter-c==0.24.2
+ + ty==0.0.69
+ + unittest-parallel==1.8.3
+ + urllib3==2.7.0
+ + zstandard==0.25.0
+
+[1;32m** Safety **[0m
+Checking /Users/mile/work/tesla-port/opendbc/.baseline/opendbc/safety/tests/misra/main.c ...
+Checking /Users/mile/work/tesla-port/opendbc/.baseline/opendbc/safety/tests/misra/main.c: __GNUC__=9;__has_include_next(x)=0...
+nofile:0:0: information: Active checkers: 268/386 [checkersReport]
+
+
+[1;32mSuccess![0m took 16 seconds

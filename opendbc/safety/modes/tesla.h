@@ -181,7 +181,8 @@ static void tesla_rx_hook(const CANPacket_t *msg) {
       update_sample(&angle_meas, angle_meas_new);
 
       const int hands_on_level = msg->data[4] >> 6;  // EPAS3S_handsOnLevel
-      const int torsion_bar_torque = (int)(((msg->data[2] & 0x0FU) << 8) | msg->data[3]) - 2050;  // EPAS3S_torsionBarTorque in 0.01 Nm
+      const int raw_torsion_bar_torque = ((msg->data[2] & 0x0FU) << 8) | msg->data[3];
+      const int torsion_bar_torque = raw_torsion_bar_torque - 2050;  // EPAS3S_torsionBarTorque in 0.01 Nm
       const int eac_status = msg->data[6] >> 5;  // EPAS3S_eacStatus
       const int eac_error_code = msg->data[2] >> 4;  // EPAS3S_eacErrorCode
 
@@ -324,9 +325,6 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
 
   // Steering control: (0.1 * val) - 1638.35 in deg.
   if (msg->addr == 0x488U) {
-    // We use 1/10 deg as a unit here
-    int raw_angle_can = ((msg->data[0] & 0x7FU) << 8) | msg->data[1];
-    int desired_angle = raw_angle_can - 16384;
     int steer_control_type = msg->data[2] >> 6;
     const int angle_ctrl_type = tesla_get_steer_ctrl_type(1);
     const int lkas_ctrl_type = tesla_get_steer_ctrl_type(2);
@@ -339,6 +337,9 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
       tesla_ap_stock_lateral_active = true;
       violation = true;
     } else {
+      // We use 1/10 deg as a unit here
+      int raw_angle_can = ((msg->data[0] & 0x7FU) << 8) | msg->data[1];
+      int desired_angle = raw_angle_can - 16384;
       lateral_takeover = tesla_ap_stock_lateral_active;
 
       if (steer_angle_cmd_checks_vm(desired_angle, steer_control_enabled, TESLA_STEERING_LIMITS, TESLA_STEERING_PARAMS)) {

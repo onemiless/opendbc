@@ -1,0 +1,25 @@
+{
+  "lean_base": "7b519bc3c79d31a8e1217a0e91a03a6586839019",
+  "devsp_source": "3b9bf1895eca4983b2ed7cb620f318d362129112",
+  "shared_count": 12,
+  "shared_paths": [
+    "opendbc/can/dbc.py",
+    "opendbc/car/structs.py",
+    "opendbc/car/tests/routes.py",
+    "opendbc/car/tests/test_fw_fingerprint.py",
+    "opendbc/car/values.py",
+    "opendbc/safety/declarations.h",
+    "opendbc/safety/modes/defaults.h",
+    "opendbc/safety/safety.h",
+    "opendbc/safety/tests/libsafety/safety.c",
+    "opendbc/safety/tests/test_defaults.py",
+    "opendbc/sunnypilot/car/car_list.json",
+    "opendbc/sunnypilot/car/interfaces.py"
+  ],
+  "toyota_source_unchanged": true,
+  "unchanged_baseline_can_failure_count": 38,
+  "source_deviations": [
+    "opendbc/car/tesla/interface.py",
+    "opendbc/safety/modes/tesla.h"
+  ]
+}

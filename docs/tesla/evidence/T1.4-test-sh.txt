@@ -1,0 +1,2 @@
+Raw output compressed as T1.4-test-sh.txt.gz. SHA256 (uncompressed): f46d31515e4a8bfa89f265594b44ae11854037bc213175b304c8fb6e75c047a4
+Shell runner executed 1596 unittest cases OK (179 skipped) on initial run, but coverage stage failed: llvm-cov not on PATH; with Xcode PATH and SDKROOT, gcovr could not infer working directory and reported read-only filesystem. Retried log contains NUL holes from prior compiler teardown. Coverage not accepted. Independent final pytest safety and MISRA logs are clean.

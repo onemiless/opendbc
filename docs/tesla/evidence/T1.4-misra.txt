@@ -1,0 +1,11 @@
+WARN Server returned unusable 304 for: https://huggingface.co/datasets/commaai/commaCarSegments/resolve/main/dist/comma_car_segments-0.1.0-py3-none-any.whl
+Resolved 33 packages in 1.75s
+Audited 31 packages in 5ms
+
+[1;32m** Safety **[0m
+Checking /Users/mile/work/tesla-port/opendbc/opendbc/safety/tests/misra/main.c ...
+Checking /Users/mile/work/tesla-port/opendbc/opendbc/safety/tests/misra/main.c: __GNUC__=9;__has_include_next(x)=0...
+nofile:0:0: information: Active checkers: 268/386 [checkersReport]
+
+
+[1;32mSuccess![0m took 14 seconds
