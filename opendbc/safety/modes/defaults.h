@@ -41,7 +41,7 @@ static void nooutput_ambient_reset(void) {
 static safety_config nooutput_init(uint16_t param) {
   nooutput_ambient_enabled = param == 1U;
   nooutput_ambient_reset();
-  safety_config ret = (safety_config){NULL, 0, NULL, 0, true}; // NOLINT(readability/braces)
+  safety_config ret = (safety_config){NULL, 0, NULL, 0, true};  // NOLINT(readability/braces)
   if (nooutput_ambient_enabled) {
     ret.tx_msgs = NOOUTPUT_AMBIENT_TX_MSGS;
     ret.tx_msgs_len = sizeof(NOOUTPUT_AMBIENT_TX_MSGS) / sizeof(NOOUTPUT_AMBIENT_TX_MSGS[0]);
@@ -105,7 +105,7 @@ static safety_config alloutput_init(uint16_t param) {
   const uint16_t ALLOUTPUT_PARAM_PASSTHROUGH = 1;
   controls_allowed = true;
   bool alloutput_passthrough = GET_FLAG(param, ALLOUTPUT_PARAM_PASSTHROUGH);
-  return (safety_config){NULL, 0, NULL, 0, !alloutput_passthrough}; // NOLINT(readability/braces)
+  return (safety_config){NULL, 0, NULL, 0, !alloutput_passthrough};  // NOLINT(readability/braces)
 }
 
 static bool alloutput_tx_hook(const CANPacket_t *msg) {
