@@ -54,8 +54,6 @@ class CarInterface(CarInterfaceBase):
   def _get_params_sp(stock_cp: structs.CarParams, ret: structs.CarParamsSP, candidate, fingerprint: dict[int, dict[int, int]],
                      car_fw: list[structs.CarParams.CarFw], alpha_long: bool, is_release_sp: bool, docs: bool) -> structs.CarParamsSP:
 
-    stock_cp.enableBsm = True
-
     if candidate == CAR.TESLA_MODEL_X:
       stock_cp.dashcamOnly = False
 
