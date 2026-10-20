@@ -73,6 +73,7 @@ class CarStateExt:
     self.tesla_speed_button_template_nanos = 0
     self.tesla_speed_limit_target = 0.0
     self.tesla_speed_limit_target_valid = False
+    self.tesla_speed_limit_offset = 0  # car display units, set by the card adapter
     self.tesla_speed_units = "KPH"
     self.tesla_manual_speed_adjustment_counter = 0
     self.tesla_speed_auto_resume_gesture_counter = 0
@@ -792,6 +793,10 @@ class CarStateExt:
         ret_sp.speedLimit = speed_limit * CV.KPH_TO_MS
       elif speed_units == "MPH":
         ret_sp.speedLimit = speed_limit * CV.MPH_TO_MS
+
+    unit = CV.MPH_TO_MS if self.tesla_speed_units == "MPH" else CV.KPH_TO_MS
+    target = ret_sp.speedLimit + self.tesla_speed_limit_offset * unit
+    self.update_speed_limit_target(target, ret_sp.speedLimit > 0 and target > 0)
 
   @staticmethod
   def get_parser(CP: structs.CarParams, CP_SP: structs.CarParamsSP) -> dict[StrEnum, CANParser]:
