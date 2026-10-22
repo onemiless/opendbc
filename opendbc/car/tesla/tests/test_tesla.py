@@ -74,10 +74,10 @@ PLATFORM_TO_CAR = {
   b'X': CAR.TESLA_MODEL_X,
 }
 
+
 # Hypothesized FSD 14 profile, in terms of variant_code bookends (given software_major >= 4):
 #   M3: variant_code starts with '4H',  ends with '015'
 #   MY: variant_code starts with '4',   ends with '003'
-# Older series (M3 '014', MY '002') are never FSD 14.
 FSD_14_FW_RULE = {
   CAR.TESLA_MODEL_3: (b'4H', b'015'),
   CAR.TESLA_MODEL_Y: (b'4',  b'003'),
@@ -97,12 +97,12 @@ class TestTeslaFingerprint(unittest.TestCase):
         assert PLATFORM_TO_CAR[m['platform']] == car_model, f"Platform letter {m['platform']!r} != {car_model.value}: {fw}"
 
   def test_fsd_14_fw(self):
-    for car_model, ecus in FW_VERSIONS.items():
+    for car_model in FSD_14_FW:
       if car_model not in FSD_14_FW_RULE:
         continue
 
       variant_prefix, variant_suffix = FSD_14_FW_RULE[car_model]
-      for fw in ecus.get((Ecu.eps, 0x730, None), []):
+      for fw in FSD_14_FW.get(car_model, []):
         m = FW_RE.match(fw)
         assert m is not None, f"Unparsable FW: {fw}"
 
@@ -125,7 +125,7 @@ class TestTeslaFingerprint(unittest.TestCase):
     self.assertFalse(cp.flags & TeslaFlags.FSD_14)
     self.assertFalse(cp.safetyConfigs[0].safetyParam & TeslaSafetyFlags.FSD_14)
 
-    tesla_can = TeslaCAN(cp, CANPacker("tesla_model3_party"))
+    tesla_can = TeslaCAN(cp, CANPacker("tesla_model3_party_legacy_generated"))
     _, steering_control, _ = tesla_can.create_steering_control(0.0, True)
     self.assertEqual(1, steering_control[2] >> 6)
 
@@ -940,14 +940,14 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
       "DAS_accelMax": 0.3,
       "DAS_controlCounter": 6,
     }
-    tesla_can = TeslaCAN(SimpleNamespace(flags=0), CANPacker("tesla_model3_party"))
+    tesla_can = TeslaCAN(SimpleNamespace(flags=0), CANPacker("tesla_model3_party_legacy_generated"))
     _, actual, _ = tesla_can.create_stock_longitudinal_handoff(values)
     aeb_event = actual[2] & 0x03
 
     self.assertEqual(3, aeb_event)
 
   def test_stock_lateral_handoff_uses_blocked_internal_marker(self):
-    tesla_can = TeslaCAN(SimpleNamespace(flags=0), CANPacker("tesla_model3_party"))
+    tesla_can = TeslaCAN(SimpleNamespace(flags=0), CANPacker("tesla_model3_party_legacy_generated"))
     _, actual, _ = tesla_can.create_stock_lateral_handoff(12.5)
 
     self.assertEqual(3, actual[2] >> 6)

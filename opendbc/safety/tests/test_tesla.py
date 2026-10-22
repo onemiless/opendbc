@@ -71,9 +71,9 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
 
   def setUp(self):
     self.VM = VehicleModel(get_safety_CP())
-    self.packer = CANPackerSafety("tesla_model3_party")
+    self.packer = CANPackerSafety("tesla_model3_party_legacy_generated")
     self.packer_adas = CANPackerSafety("tesla_model3_vehicle")
-    self.define = CANDefine("tesla_model3_party")
+    self.define = CANDefine("tesla_model3_party_legacy_generated")
     self.acc_states = {d: v for v, d in self.define.dv["DAS_control"]["DAS_accState"].items()}
     self.autopark_states = {d: v for v, d in self.define.dv["DI_state"]["DI_autoparkState"].items()}
     self.active_autopark_states = [self.autopark_states[s] for s in ('ACTIVE', 'COMPLETE', 'SELFPARK_STARTED')]
@@ -692,7 +692,7 @@ class TestTeslaIgnition(unittest.TestCase):
   def setUp(self):
     self.safety = libsafety_py.libsafety
     self.safety.init_tests()
-    self.packer = CANPackerSafety("tesla_model3_party")
+    self.packer = CANPackerSafety("tesla_model3_party_legacy_generated")
 
   def _gear_msg(self, counter, gear):
     return self.packer.make_can_msg_safety("DI_systemStatus", 0,

@@ -22,6 +22,7 @@
 
 static bool tesla_longitudinal = false;
 static bool tesla_fsd_14 = false;
+static bool tesla_steering_3_bit = false;
 static bool tesla_stock_aeb = false;
 
 // Only rising edges while controls are not allowed are considered for these systems:
@@ -276,7 +277,7 @@ static void tesla_rx_hook(const CANPacket_t *msg) {
 
     // DAS_steeringControl
     if (msg->addr == 0x488U) {
-      int steering_control_type = msg->data[2] >> 6;
+      int steering_control_type = msg->data[2] >> (tesla_steering_3_bit ? 5U : 6U);
       bool tesla_stock_steering_control_now = steering_control_type != 0;  // "NONE"
 
       // Only consider rising edges while controls are not allowed
@@ -327,7 +328,7 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
     // We use 1/10 deg as a unit here
     int raw_angle_can = ((msg->data[0] & 0x7FU) << 8) | msg->data[1];
     int desired_angle = raw_angle_can - 16384;
-    int steer_control_type = msg->data[2] >> 6;
+    int steer_control_type = msg->data[2] >> (tesla_steering_3_bit ? 5U : 6U);
     const int angle_ctrl_type = tesla_get_steer_ctrl_type(1);
     const int lkas_ctrl_type = tesla_get_steer_ctrl_type(2);
     bool steer_control_enabled = (steer_control_type == angle_ctrl_type) ||  // ANGLE_CONTROL
@@ -565,7 +566,9 @@ static safety_config tesla_init(uint16_t param) {
   };
 
   const uint16_t TESLA_FLAG_FSD_14 = 2;
-  tesla_fsd_14 = GET_FLAG(param, TESLA_FLAG_FSD_14);
+  const uint16_t TESLA_FLAG_STEERING_3_BIT = 4;
+  tesla_steering_3_bit = GET_FLAG(param, TESLA_FLAG_STEERING_3_BIT);
+  tesla_fsd_14 = GET_FLAG(param, TESLA_FLAG_FSD_14) && !tesla_steering_3_bit;
 
 #ifdef ALLOW_DEBUG
   const uint16_t TESLA_FLAG_LONGITUDINAL_CONTROL = 1;

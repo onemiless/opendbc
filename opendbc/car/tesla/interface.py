@@ -41,20 +41,28 @@ class CarInterface(CarInterfaceBase):
       ret.openpilotLongitudinalControl = True
       ret.safetyConfigs[0].safetyParam |= TeslaSafetyFlags.LONG_CONTROL.value
 
-    fsd_14 = any(fw.ecu == Ecu.eps and fw.fwVersion in FSD_14_FW.get(candidate, []) for fw in car_fw)
-    if fsd_14:
+    # Tesla expanded DAS_steeringControl->DAS_steeringControlType to 3 bits: first in the FSD 14 builds for HW4 around 10-26-2025,
+    # then in the other HW4 builds around 03-02-2026, and for HW3 and HW2.5 with 2026.8.6 around 04-03-2026.
+    # The values were pushed to the right by 1 bit and kept the same definitions, plus 4 = FSD was added.
+    # These messages are only sent by the 3-bit firmware:
+    # - HW3/HW4: DAS_redundantBrakingControl (0x489)
+    # - HW2.5/HW3/HW4: DI_autonomyHealth (0x054)
+    das_steering_3_bit = 0x489 in fingerprint[CANBUS.autopilot_party] or 0x054 in fingerprint[CANBUS.party]
+
+    if das_steering_3_bit:
+      ret.flags |= TeslaFlags.STEERING_3_BIT.value
+      ret.safetyConfigs[0].safetyParam |= TeslaSafetyFlags.STEERING_3_BIT.value
+    elif any(fw.ecu == Ecu.eps and fw.fwVersion in FSD_14_FW.get(candidate, []) for fw in car_fw):
       ret.flags |= TeslaFlags.FSD_14.value
       ret.safetyConfigs[0].safetyParam |= TeslaSafetyFlags.FSD_14.value
 
-    ret.dashcamOnly = candidate in (CAR.TESLA_MODEL_X,)  # dashcam only, pending find invalidLkasSetting signal
+    ret.dashcamOnly = candidate in (CAR.TESLA_MODEL_X,)
 
     return ret
 
   @staticmethod
   def _get_params_sp(stock_cp: structs.CarParams, ret: structs.CarParamsSP, candidate, fingerprint: dict[int, dict[int, int]],
                      car_fw: list[structs.CarParams.CarFw], alpha_long: bool, is_release_sp: bool, docs: bool) -> structs.CarParamsSP:
-
-    stock_cp.enableBsm = True
 
     if candidate == CAR.TESLA_MODEL_X:
       stock_cp.dashcamOnly = False

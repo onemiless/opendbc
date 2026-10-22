@@ -4,8 +4,7 @@ from opendbc.car.tesla.values import CANBUS, CarControllerParams, TeslaFlags
 
 
 def get_steer_ctrl_type(flags: int, ctrl_type: int) -> int:
-  # Returns the flipped signal value for DAS_steeringControlType on FSD 14
-  if flags & TeslaFlags.FSD_14:
+  if flags & TeslaFlags.FSD_14 and not flags & TeslaFlags.STEERING_3_BIT:
     return {1: 2, 2: 1}.get(ctrl_type, ctrl_type)
   else:
     return ctrl_type

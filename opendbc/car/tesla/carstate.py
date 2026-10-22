@@ -6,7 +6,7 @@ from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.interfaces import CarStateBase
 from opendbc.car.vehicle_model import VehicleModel
 from opendbc.car.tesla.teslacan import get_steer_ctrl_type
-from opendbc.car.tesla.values import DBC, CANBUS, GEAR_MAP, STEER_DISENGAGE_THRESHOLD, STEER_THRESHOLD, TeslaFlags
+from opendbc.car.tesla.values import CANBUS, GEAR_MAP, STEER_DISENGAGE_THRESHOLD, STEER_THRESHOLD, TeslaFlags, get_party_dbc
 
 from opendbc.sunnypilot.car.tesla.carstate_ext import CarStateExt
 
@@ -27,7 +27,7 @@ class CarState(CarStateBase, CarStateExt):
   def __init__(self, CP, CP_SP):
     CarStateBase.__init__(self, CP, CP_SP)
     CarStateExt.__init__(self, CP, CP_SP)
-    self.can_define = CANDefine(DBC[CP.carFingerprint][Bus.party])
+    self.can_define = CANDefine(get_party_dbc(CP))
     self.VM = VehicleModel(CP)
     self.shifter_values = self.can_define.dv["DI_systemStatus"]["DI_gear"]
 
@@ -215,7 +215,7 @@ class CarState(CarStateBase, CarStateExt):
   @staticmethod
   def get_can_parsers(CP, CP_SP):
     return {
-      Bus.party: CANParser(DBC[CP.carFingerprint][Bus.party], [], CANBUS.party),
-      Bus.ap_party: CANParser(DBC[CP.carFingerprint][Bus.party], [], CANBUS.autopilot_party),
+      Bus.party: CANParser(get_party_dbc(CP), [], CANBUS.party),
+      Bus.ap_party: CANParser(get_party_dbc(CP), [], CANBUS.autopilot_party),
       **CarStateExt.get_parser(CP, CP_SP),
     }

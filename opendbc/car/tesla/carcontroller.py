@@ -1,10 +1,10 @@
 import numpy as np
 from opendbc.can import CANPacker
-from opendbc.car import Bus, DT_CTRL
+from opendbc.car import DT_CTRL
 from opendbc.car.lateral import apply_steer_angle_limits_vm
 from opendbc.car.interfaces import CarControllerBase
 from opendbc.car.tesla.teslacan import TeslaCAN
-from opendbc.car.tesla.values import CarControllerParams
+from opendbc.car.tesla.values import CarControllerParams, get_party_dbc
 from opendbc.car.vehicle_model import VehicleModel
 from opendbc.sunnypilot.car.tesla.coop_steering import CoopSteeringCarController
 from opendbc.sunnypilot.car.tesla.dynamic_acc_debug import log_dynamic_acc
@@ -31,7 +31,7 @@ class CarController(CarControllerBase):
     self.apply_angle_last = 0
     self.steering_angle_sent = 0.0
     self.accel_sent = 0.0
-    self.packer = CANPacker(dbc_names[Bus.party])
+    self.packer = CANPacker(get_party_dbc(CP))
     self.tesla_can = TeslaCAN(CP, self.packer)
     self.ars408_transmitter = ARS408Transmitter(CP_SP)
 
