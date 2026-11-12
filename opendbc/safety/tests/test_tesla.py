@@ -38,7 +38,7 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
   RELAY_MALFUNCTION_ADDRS = {0: (MSG_DAS_steeringControl, MSG_APS_eacMonitor)}
   FWD_BLACKLISTED_ADDRS = {2: [MSG_DAS_steeringControl, MSG_APS_eacMonitor]}
   TX_MSGS = [[MSG_DAS_steeringControl, 0], [MSG_APS_eacMonitor, 0], [MSG_DAS_Control, 0],
-             [0x679, CANBUS.vehicle], [MSG_VCLEFT_SWITCH_STATUS, CANBUS.vehicle]]
+             [0x249, CANBUS.vehicle], [0x679, CANBUS.vehicle], [MSG_VCLEFT_SWITCH_STATUS, CANBUS.vehicle]]
 
   STANDSTILL_THRESHOLD = 0.1
   GAS_PRESSED_THRESHOLD = 3
@@ -779,3 +779,70 @@ class TestTeslaVehicleBusSafety(TestTeslaSafetyBase):
 
 if __name__ == "__main__":
   unittest.main()
+
+
+class TestTeslaNavStalk(unittest.TestCase):
+  @staticmethod
+  def frame(counter, turn=0, upper=0xA0, tail=0x12):
+    data = bytearray((0, upper | counter, turn, tail))
+    crc = 0
+    for value in (upper, turn, tail, 0):
+      crc ^= value
+      for _ in range(8):
+        crc = ((crc << 1) ^ 0x2F) & 0xFF if crc & 0x80 else (crc << 1) & 0xFF
+    data[0] = crc ^ (0x9B, 0xE8, 0x2A, 0xD3, 0xD3, 0x83, 0x4C, 0x5E, 0x3F, 0x5E, 0xE2, 0x28, 0x3A, 0x13, 0xAF, 0xCE)[counter]
+    return data
+
+  def test_stalk_clone(self):
+    s = libsafety_py.libsafety
+    self.addCleanup(s.set_current_safety_param_sp, 0)
+
+    def reset(vehicle=True, engaged=True):
+      s.set_current_safety_param_sp(TeslaSafetyFlagsSP.HAS_VEHICLE_BUS if vehicle else 0)
+      s.set_safety_hooks(CarParams.SafetyModel.tesla, 0)
+      s.init_tests()
+      s.set_timer(1_000_000)
+      s.set_controls_allowed(engaged)
+
+    def rx(data, bus=1):
+      return s.safety_rx_hook(libsafety_py.make_CANPacket(0x249, bus, data))
+
+    def tx(data, bus=1):
+      return s.safety_tx_hook(libsafety_py.make_CANPacket(0x249, bus, data))
+
+    for turn in range(16):
+      for engaged in (False, True):
+        reset(engaged=engaged)
+        self.assertTrue(rx(self.frame(15)))
+        self.assertEqual(bool(tx(self.frame(0, turn))), engaged and turn in (2, 6))
+    for vehicle in (False, True):
+      reset(vehicle=vehicle)
+      rx(self.frame(15))
+      self.assertEqual(bool(tx(self.frame(0, 6))), vehicle)
+    for bad in (self.frame(1, 6), self.frame(0, 6, upper=0xB0), self.frame(0, 6, tail=0x13),
+                bytearray((0, 0xA0, 6, 0x12))):
+      reset()
+      rx(self.frame(15))
+      self.assertFalse(tx(bad))
+    reset()
+    self.assertFalse(tx(self.frame(0, 6)))
+    rx(self.frame(15), bus=0)
+    self.assertFalse(tx(self.frame(0, 6)))
+    rx(self.frame(15))
+    self.assertFalse(tx(self.frame(0, 6), bus=0))
+    s.set_timer(1_300_001)
+    self.assertFalse(tx(self.frame(0, 6)))
+    for bad_rx in (self.frame(15, 2), bytearray((0, 0xAF, 0, 0x12))):
+      reset()
+      rx(self.frame(15))
+      rx(bad_rx)
+      self.assertFalse(tx(self.frame(0, 6)))
+    reset()
+    rx(self.frame(15))
+    self.assertTrue(tx(self.frame(0, 6)))
+    self.assertFalse(tx(self.frame(0, 6)))
+    # One clone per fresh frame, >=50 ms apart, at most 30 in a 10-second window.
+    for i in range(1, 31):
+      s.set_timer(1_000_000 + i * 50_000)
+      rx(self.frame((15 + i) % 16))
+      self.assertEqual(bool(tx(self.frame(i % 16, 6))), i < 30)

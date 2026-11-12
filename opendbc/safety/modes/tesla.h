@@ -70,6 +70,26 @@ static uint32_t tesla_ambient_tx_ts = 0U;
 static uint32_t tesla_ambient_session_ts = 0U;
 static uint8_t tesla_ambient_session_count = 0U;
 
+static uint8_t tesla_stalk_template[4];
+static bool tesla_stalk_valid = false;
+static uint32_t tesla_stalk_rx_ts = 0U;
+static uint32_t tesla_stalk_tx_ts = 0U;
+static uint32_t tesla_stalk_window_ts = 0U;
+static uint8_t tesla_stalk_count = 0U;
+
+static uint8_t tesla_stalk_checksum(const CANPacket_t *msg) {
+  static const uint8_t magic[16] = {0x9B, 0xE8, 0x2A, 0xD3, 0xD3, 0x83, 0x4C, 0x5E, 0x3F, 0x5E, 0xE2, 0x28, 0x3A, 0x13, 0xAF, 0xCE};
+  const uint8_t data[4] = {msg->data[1] & 0xF0U, msg->data[2], msg->data[3], 0U};
+  uint8_t crc = 0U;
+  for (uint8_t i = 0U; i < 4U; i++) {
+    crc ^= data[i];
+    for (uint8_t j = 0U; j < 8U; j++) {
+      crc = (crc & 0x80U) ? (uint8_t)((crc << 1) ^ 0x2FU) : (uint8_t)(crc << 1);
+    }
+  }
+  return crc ^ magic[msg->data[1] & 0xFU];
+}
+
 static uint8_t tesla_get_counter(const CANPacket_t *msg) {
 
   uint8_t cnt = 0;
@@ -163,6 +183,17 @@ static int tesla_get_steer_ctrl_type(const int ctrl_type) {
 
 static void tesla_ambient_rx_observer(const CANPacket_t *msg) {
   if (!msg->extended && !msg->returned && !msg->rejected) {
+    if ((msg->bus == 1U) && (msg->addr == 0x249U)) {
+      tesla_stalk_valid = (GET_LEN(msg) == 4U) && ((msg->data[2] & 0xFU) == 0U) &&
+                          (msg->data[0] == tesla_stalk_checksum(msg));
+      if (tesla_stalk_valid) {
+        for (uint8_t i = 0U; i < 4U; i++) {
+          tesla_stalk_template[i] = msg->data[i];
+        }
+        tesla_stalk_rx_ts = microsecond_timer_get();
+      }
+    }
+
     if ((GET_LEN(msg) == 7U) && (msg->bus == 1U) && (msg->addr == 0x679U)) {
       for (uint8_t i = 0U; i < 7U; i++) {
         tesla_ambient_template[i] = msg->data[i];
@@ -444,6 +475,32 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
     }
   }
 
+  if (msg->addr == 0x249U) {
+    const uint32_t now = microsecond_timer_get();
+    const uint8_t turn = msg->data[2] & 0xFU;
+    const bool fresh = tesla_stalk_valid && (safety_get_ts_elapsed(now, tesla_stalk_rx_ts) <= 300000U);
+    const bool clone = ((msg->data[1] & 0xF0U) == (tesla_stalk_template[1] & 0xF0U)) &&
+                       ((msg->data[2] & 0xF0U) == (tesla_stalk_template[2] & 0xF0U)) &&
+                       (msg->data[3] == tesla_stalk_template[3]);
+    const bool counter = (msg->data[1] & 0xFU) == ((tesla_stalk_template[1] + 1U) & 0xFU);
+    const bool new_window = (tesla_stalk_count == 0U) || (safety_get_ts_elapsed(now, tesla_stalk_window_ts) >= 10000000U);
+    const bool rate = (tesla_stalk_count == 0U) || (safety_get_ts_elapsed(now, tesla_stalk_tx_ts) >= 50000U);
+    if (!tesla_has_vehicle_bus || !controls_allowed || !fresh || !clone || !counter ||
+        ((turn != 2U) && (turn != 6U)) || (msg->data[0] != tesla_stalk_checksum(msg)) ||
+        !rate || (!new_window && (tesla_stalk_count >= 30U))) {
+      violation = true;
+    }
+    if (!violation) {
+      if (new_window) {
+        tesla_stalk_window_ts = now;
+        tesla_stalk_count = 0U;
+      }
+      tesla_stalk_count++;
+      tesla_stalk_tx_ts = now;
+      tesla_stalk_valid = false;
+    }
+  }
+
   // Right scroll wheel: one signed tick cloned from a fresh vehicle RX frame.
   if (msg->addr == 0x3C2U) {
     const uint8_t right_scroll_ticks = msg->data[3] & 0x3FU;
@@ -534,6 +591,7 @@ static safety_config tesla_init(uint16_t param) {
     {0x2b9, 0, 8, .check_relay = false},                                   // DAS_control (for cancel)
     {0x27D, 0, 3, .check_relay = true, .disable_static_blocking = true},   // APS_eacMonitor
     {0x3C2, 1, 8, .check_relay = false, .disable_static_blocking = true},  // VCLEFT_switchStatus (automatic speed limit)
+    {0x249, 1, 4, .check_relay = false, .disable_static_blocking = true}, // Bounded turn-stalk clone
     {0x679, 1, 7, .check_relay = false, .disable_static_blocking = true}, // Bounded blindspot ambient lighting
   };
 
@@ -542,6 +600,7 @@ static safety_config tesla_init(uint16_t param) {
     {0x2b9, 0, 8, .check_relay = true, .disable_static_blocking = true},  // DAS_control
     {0x27D, 0, 3, .check_relay = true, .disable_static_blocking = true},  // APS_eacMonitor
     {0x3C2, 1, 8, .check_relay = false, .disable_static_blocking = true}, // VCLEFT_switchStatus (automatic speed limit)
+    {0x249, 1, 4, .check_relay = false, .disable_static_blocking = true}, // Bounded turn-stalk clone
     {0x679, 1, 7, .check_relay = false, .disable_static_blocking = true}, // Bounded blindspot ambient lighting
   };
 
@@ -550,6 +609,7 @@ static safety_config tesla_init(uint16_t param) {
     {0x2b9, 0, 8, .check_relay = false},
     {0x27D, 0, 3, .check_relay = true, .disable_static_blocking = true},
     {0x3C2, 1, 8, .check_relay = false, .disable_static_blocking = true},
+    {0x249, 1, 4, .check_relay = false, .disable_static_blocking = true}, // Bounded turn-stalk clone
     {0x679, 1, 7, .check_relay = false, .disable_static_blocking = true}, // Bounded blindspot ambient lighting
     {0x300, 1, 2, .check_relay = false, .disable_static_blocking = true},
     {0x301, 1, 2, .check_relay = false, .disable_static_blocking = true},
@@ -560,6 +620,7 @@ static safety_config tesla_init(uint16_t param) {
     {0x2b9, 0, 8, .check_relay = true, .disable_static_blocking = true},
     {0x27D, 0, 3, .check_relay = true, .disable_static_blocking = true},
     {0x3C2, 1, 8, .check_relay = false, .disable_static_blocking = true},
+    {0x249, 1, 4, .check_relay = false, .disable_static_blocking = true}, // Bounded turn-stalk clone
     {0x679, 1, 7, .check_relay = false, .disable_static_blocking = true}, // Bounded blindspot ambient lighting
     {0x300, 1, 2, .check_relay = false, .disable_static_blocking = true},
     {0x301, 1, 2, .check_relay = false, .disable_static_blocking = true},
@@ -600,6 +661,8 @@ static safety_config tesla_init(uint16_t param) {
   tesla_auto_speed_limit = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_AUTO_SPEED_LIMIT);
   tesla_ars408_radar = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_ARS408_RADAR);
 
+  tesla_stalk_valid = false;
+  tesla_stalk_count = 0U;
   tesla_ambient_template_valid = false;
   tesla_ambient_tx_valid = false;
   tesla_ambient_template_ts = 0U;
