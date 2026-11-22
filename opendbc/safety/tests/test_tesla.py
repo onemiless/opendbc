@@ -873,6 +873,42 @@ class TestTeslaDynamicTxWhitelist(unittest.TestCase):
     self.s.set_timer(t)
     return self.s.safety_tx_hook(libsafety_py.make_CANPacket(addr, bus, b"\x00" * length))
 
+  def test_camera_request(self):
+    from opendbc.sunnypilot.car.tesla.values import TESLA_DYNAMIC_TX_WHITELIST
+    rule, = (r for r in TESLA_DYNAMIC_TX_WHITELIST if r[:2] == (1, 0x3FD))
+    self.assertEqual(self.s.DYNAMIC_TX_OK, self._add(*rule))
+    self._tesla()
+    s = self.s
+    s.set_timer(0)
+    data = bytearray.fromhex("0100060001081280")
+
+    def packet(bus=1):
+      return libsafety_py.make_CANPacket(0x3FD, bus, data)
+
+    self.assertFalse(s.safety_tx_hook(packet()))
+    for request in range(16):
+      s.set_timer((request + 1) * 100_000)
+      data[1] = 0
+      s.safety_rx_hook(packet())
+      data[1] = request
+      self.assertEqual(bool(s.safety_tx_hook(packet())), request in (0, 7, 10))
+    s.set_timer(2_000_000)
+    data[1] = 0
+    s.safety_rx_hook(packet())
+    self.assertFalse(s.safety_tx_hook(packet(0)))
+    data[0] = 0
+    self.assertFalse(s.safety_tx_hook(packet()))
+    data[0] = 1
+    data[7] ^= 1
+    self.assertFalse(s.safety_tx_hook(packet()))
+    data[7] ^= 1
+    self.assertFalse(s.safety_tx_hook(libsafety_py.make_CANPacket(0x3FD, 1, data[:7])))
+    self.assertTrue(s.safety_tx_hook(packet()))
+    self.assertFalse(s.safety_tx_hook(packet()))
+    s.safety_rx_hook(packet())
+    s.set_timer(2_300_001)
+    self.assertFalse(s.safety_tx_hook(packet()))
+
   def test_add_validation(self):
     s = self.s
     self.assertEqual(s.DYNAMIC_TX_OK, self._add(1, 0x123, 8))

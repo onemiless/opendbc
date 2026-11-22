@@ -7,7 +7,9 @@ See the LICENSE.md file in the root directory for more details.
 from enum import IntFlag
 
 
-TESLA_DYNAMIC_TX_WHITELIST: tuple[tuple[int, int, int, bool, int], ...] = ()
+TESLA_DYNAMIC_TX_WHITELIST: tuple[tuple[int, int, int, bool, int], ...] = (
+  (1, 0x3FD, 8, False, 100),  # UI_selectableCameraRequest
+)
 """Add future Bus 1 CAN messages with standard 11-bit IDs without reflashing Panda.
 
 Each rule is (bus, addr, len, require_engaged, min_interval_ms).
