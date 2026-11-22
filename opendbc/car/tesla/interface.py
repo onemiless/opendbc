@@ -73,9 +73,8 @@ class CarInterface(CarInterfaceBase):
 
     if ret.flags & TeslaFlagsSP.HAS_VEHICLE_BUS:
       rules = []
+      # Rules are validated by TestTeslaDynamicTxWhitelistConfig and again by pandad/firmware; never crash card here.
       for bus, addr, length, require_engaged, min_interval_ms in TESLA_DYNAMIC_TX_WHITELIST:
-        if not (bus == 1 and 1 <= addr <= 0x7FF and 1 <= length <= 8 and 0 <= min_interval_ms <= 0x0FFF):
-          raise ValueError(f"Invalid Tesla dynamic TX rule: {(bus, addr, length, require_engaged, min_interval_ms)}")
         rules.append(structs.CarParamsSP.DynamicTxRule(bus=bus, addr=addr, len=length, requireEngaged=require_engaged, minIntervalMs=min_interval_ms))
       ret.dynamicTxRules = rules
 

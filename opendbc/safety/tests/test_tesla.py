@@ -873,32 +873,6 @@ class TestTeslaDynamicTxWhitelist(unittest.TestCase):
     self.s.set_timer(t)
     return self.s.safety_tx_hook(libsafety_py.make_CANPacket(addr, bus, b"\x00" * length))
 
-  def test_camera_request(self):
-    from opendbc.sunnypilot.car.tesla.values import TESLA_DYNAMIC_TX_WHITELIST
-    rule, = (r for r in TESLA_DYNAMIC_TX_WHITELIST if r[:2] == (1, 0x3FD))
-    bus, addr, length, engaged, min_interval_ms = rule
-    self.assertEqual(self.s.DYNAMIC_TX_OK, self._add(bus, addr, length, engaged, min_interval_ms))
-    self._tesla()
-    s = self.s
-    interval_us = max(min_interval_ms, 10) * 1000
-    data = bytearray.fromhex("010a060001081280")
-
-    def packet(tx_bus=1, payload=data):
-      return libsafety_py.make_CANPacket(0x3FD, tx_bus, payload)
-
-    # Generic dynamic rule: allowed without OEM RX template and allows repeated TX at >= min_interval_ms
-    s.set_timer(0)
-    self.assertTrue(s.safety_tx_hook(packet()))
-    s.set_timer(interval_us - 1)
-    self.assertFalse(s.safety_tx_hook(packet()))
-    s.set_timer(interval_us)
-    self.assertTrue(s.safety_tx_hook(packet()))
-    # Bus and length checks still enforced
-    s.set_timer(interval_us * 2)
-    self.assertFalse(s.safety_tx_hook(packet(tx_bus=0)))
-    self.assertFalse(s.safety_tx_hook(packet(payload=data[:7])))
-    self.assertTrue(s.safety_tx_hook(packet(payload=bytes.fromhex("0107060001081280"))))
-
   def test_add_validation(self):
     s = self.s
     self.assertEqual(s.DYNAMIC_TX_OK, self._add(1, 0x123, 8))

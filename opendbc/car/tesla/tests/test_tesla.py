@@ -951,3 +951,23 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
     _, actual, _ = tesla_can.create_stock_lateral_handoff(12.5)
 
     self.assertEqual(3, actual[2] >> 6)
+
+
+class TestTeslaDynamicTxWhitelistConfig(unittest.TestCase):
+  # Mirrors protected_addrs in opendbc/safety/modes/tesla.h; the firmware rejects these with PROTECTED.
+  PROTECTED = {0x3C2, 0x249, 0x679, 0x300, 0x301, 0x3DF}
+
+  def test_rules_are_uploadable(self):
+    from opendbc.sunnypilot.car.tesla.values import TESLA_DYNAMIC_TX_WHITELIST
+    self.assertLessEqual(len(TESLA_DYNAMIC_TX_WHITELIST), 16)
+    addrs = [addr for _, addr, _, _, _ in TESLA_DYNAMIC_TX_WHITELIST]
+    self.assertEqual(len(addrs), len(set(addrs)), "duplicate addr")
+    for rule in TESLA_DYNAMIC_TX_WHITELIST:
+      bus, addr, length, require_engaged, min_interval_ms = rule
+      with self.subTest(rule=rule):
+        self.assertEqual(1, bus)
+        self.assertTrue(1 <= addr <= 0x7FF)
+        self.assertNotIn(addr, self.PROTECTED)
+        self.assertTrue(1 <= length <= 8)
+        self.assertIsInstance(require_engaged, bool)
+        self.assertTrue(0 <= min_interval_ms <= 0x0FFF)
