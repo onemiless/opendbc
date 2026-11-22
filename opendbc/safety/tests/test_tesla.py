@@ -846,3 +846,80 @@ class TestTeslaNavStalk(unittest.TestCase):
       s.set_timer(1_000_000 + i * 50_000)
       rx(self.frame((15 + i) % 16))
       self.assertEqual(bool(tx(self.frame(i % 16, 6))), i < 30)
+
+
+class TestTeslaDynamicTxWhitelist(unittest.TestCase):
+  PROTECTED = (0x3C2, 0x249, 0x679, 0x300, 0x301, 0x3DF)
+
+  def setUp(self):
+    self.s = libsafety_py.libsafety
+    self.addCleanup(self._unlock_and_clear)
+    self._unlock_and_clear()
+
+  def _unlock_and_clear(self):
+    self.s.set_current_safety_param_sp(0)
+    self.s.set_safety_hooks(CarParams.SafetyModel.noOutput, 0)
+    self.assertEqual(self.s.DYNAMIC_TX_OK, self.s.safety_clear_dynamic_tx_whitelist())
+
+  def _add(self, bus, addr, length, engaged=False, interval_ms=0, reserved=0):
+    return self.s.safety_add_dynamic_tx_whitelist(addr | (bus << 11) | (int(engaged) << 13) | reserved, length | (interval_ms << 4))
+
+  def _tesla(self, vehicle_bus=True):
+    self.s.set_current_safety_param_sp(TeslaSafetyFlagsSP.HAS_VEHICLE_BUS if vehicle_bus else 0)
+    self.s.set_safety_hooks(CarParams.SafetyModel.tesla, 0)
+    self.s.init_tests()
+
+  def _tx(self, addr, bus, length, t):
+    self.s.set_timer(t)
+    return self.s.safety_tx_hook(libsafety_py.make_CANPacket(addr, bus, b"\x00" * length))
+
+  def test_add_validation(self):
+    s = self.s
+    self.assertEqual(s.DYNAMIC_TX_OK, self._add(1, 0x123, 8))
+    for args, kw in [((0, 0x200, 8), {}), ((2, 0x200, 8), {}), ((3, 0x200, 8), {}), ((1, 0, 8), {}),
+                     ((1, 0x200, 0), {}), ((1, 0x200, 9), {}), ((1, 0x123, 4), {"engaged": True}),
+                     ((1, 0x200, 8), {"reserved": 0x4000}), ((1, 0x200, 8), {"reserved": 0x8000})]:
+      with self.subTest(args=args, kw=kw):
+        self.assertEqual(s.DYNAMIC_TX_ERR_INVALID, self._add(*args, **kw))
+    for addr in self.PROTECTED:
+      self.assertEqual(s.DYNAMIC_TX_ERR_PROTECTED, self._add(1, addr, 8))
+    for addr in range(0x400, 0x400 + s.DYNAMIC_TX_MAX_MSGS - 1):
+      self.assertEqual(s.DYNAMIC_TX_OK, self._add(1, addr, 8))
+    self.assertEqual(s.DYNAMIC_TX_ERR_FULL, self._add(1, 0x500, 8))
+
+  def test_locked_in_car_mode_and_cleared_on_exit(self):
+    s = self.s
+    self.assertEqual(s.DYNAMIC_TX_OK, self._add(1, 0x123, 8))
+    self._tesla()
+    self.assertEqual(s.DYNAMIC_TX_ERR_LOCKED, self._add(1, 0x124, 8))
+    self.assertEqual(s.DYNAMIC_TX_ERR_LOCKED, s.safety_clear_dynamic_tx_whitelist())
+    self.assertTrue(self._tx(0x123, 1, 8, 1_000_000))
+    # Leaving SAFETY_TESLA auto-clears dynamic rules without an explicit clear call.
+    s.set_safety_hooks(CarParams.SafetyModel.noOutput, 0)
+    self._tesla()
+    self.assertFalse(self._tx(0x123, 1, 8, 2_000_000))
+
+  def test_tx_gating_and_rate_limit(self):
+    self.assertEqual(self.s.DYNAMIC_TX_OK, self._add(1, 0x123, 8, interval_ms=5))  # floored to 10 ms
+    self.assertEqual(self.s.DYNAMIC_TX_OK, self._add(1, 0x124, 4, engaged=True, interval_ms=100))
+    # Immediately after tesla_init (before init_tests clears tesla_summon), dynamic TX must be blocked.
+    self.s.set_current_safety_param_sp(TeslaSafetyFlagsSP.HAS_VEHICLE_BUS)
+    self.s.set_safety_hooks(CarParams.SafetyModel.tesla, 0)
+    self.assertFalse(self._tx(0x123, 1, 8, 500_000))
+    self._tesla()
+    t = 0xFFFF_FFFF - 4_000
+    self.assertTrue(self._tx(0x123, 1, 8, t))
+    self.assertFalse(self._tx(0x123, 1, 7, (t + 20_000) & 0xFFFF_FFFF))  # DLC mismatch
+    self.assertFalse(self._tx(0x123, 0, 8, (t + 20_000) & 0xFFFF_FFFF))
+    self.assertFalse(self._tx(0x123, 1, 8, (t + 9_999) & 0xFFFF_FFFF))  # wraps
+    self.assertTrue(self._tx(0x123, 1, 8, (t + 10_000) & 0xFFFF_FFFF))
+    self.assertFalse(self._tx(0x124, 1, 4, 1_000_000))
+    self.s.set_controls_allowed(True)
+    self.assertTrue(self._tx(0x124, 1, 4, 1_000_000))
+    self.assertFalse(self._tx(0x124, 1, 4, 1_099_999))
+    self.assertTrue(self._tx(0x124, 1, 4, 1_100_000))
+    self.s.set_relay_malfunction(True)
+    self.assertFalse(self._tx(0x123, 1, 8, 5_000_000))
+    self.s.set_relay_malfunction(False)
+    self._tesla(vehicle_bus=False)
+    self.assertFalse(self._tx(0x123, 1, 8, 6_000_000))

@@ -238,6 +238,17 @@ typedef struct {
 
 bool safety_rx_hook(const CANPacket_t *msg);
 bool safety_tx_hook(CANPacket_t *msg);
+
+// Tesla Bus-1 dynamic TX whitelist (panda 0xe9 clear / 0xea add). Writable only outside car safety modes.
+#define DYNAMIC_TX_MAX_MSGS 16U
+#define DYNAMIC_TX_MIN_INTERVAL_US 10000U
+#define DYNAMIC_TX_OK 0U
+#define DYNAMIC_TX_ERR_LOCKED 1U
+#define DYNAMIC_TX_ERR_PROTECTED 2U
+#define DYNAMIC_TX_ERR_FULL 3U
+#define DYNAMIC_TX_ERR_INVALID 4U
+uint8_t safety_clear_dynamic_tx_whitelist(void);
+uint8_t safety_add_dynamic_tx_whitelist(uint16_t param1, uint16_t param2);
 int to_signed(int d, int bits);
 void update_sample(struct sample_t *sample, int sample_new);
 bool get_longitudinal_allowed(void);

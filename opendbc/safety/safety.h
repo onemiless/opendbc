@@ -256,6 +256,11 @@ bool safety_tx_hook(CANPacket_t *msg) {
   bool safety_allowed = false;
   if (whitelisted) {
     safety_allowed = current_hooks->tx(msg);
+  } else if (!relay_malfunction && (current_safety_mode == SAFETY_TESLA)) {
+    whitelisted = tesla_dynamic_tx_hook(msg);
+    safety_allowed = whitelisted;
+  } else {
+    // not whitelisted
   }
 
   return !relay_malfunction && whitelisted && safety_allowed;
@@ -488,11 +493,16 @@ int set_safety_hooks(uint16_t mode, uint16_t param) {
       set_status = 0;  // set
     }
   }
-  if ((set_status == 0) && (current_hooks->init != NULL)) {
-    current_safety_config = current_hooks->init(param);
-    // reset all dynamic fields in addr struct
-    for (int j = 0; j < current_safety_config.rx_checks_len; j++) {
-      current_safety_config.rx_checks[j].status = (RxStatus){0};
+  if (set_status == 0) {
+    if (mode != SAFETY_TESLA) {
+      tesla_dynamic_tx_msgs_len = 0U;
+    }
+    if (current_hooks->init != NULL) {
+      current_safety_config = current_hooks->init(param);
+      // reset all dynamic fields in addr struct
+      for (int j = 0; j < current_safety_config.rx_checks_len; j++) {
+        current_safety_config.rx_checks[j].status = (RxStatus){0};
+      }
     }
   }
   return set_status;

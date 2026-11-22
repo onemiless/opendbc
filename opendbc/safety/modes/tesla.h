@@ -584,6 +584,102 @@ static bool tesla_fwd_hook(int bus_num, int addr) {
   return block_msg;
 }
 
+typedef struct {
+  uint16_t addr;
+  uint8_t bus;
+  uint8_t len;
+  bool require_engaged;
+  uint32_t min_interval_us;
+  bool has_tx;
+  uint32_t last_tx_ts;
+} TeslaDynamicTxMsg;
+
+static TeslaDynamicTxMsg tesla_dynamic_tx_msgs[DYNAMIC_TX_MAX_MSGS];
+static uint8_t tesla_dynamic_tx_msgs_len = 0U;
+
+// Mirrors panda's is_car_safety_mode(): the table is frozen in every car safety mode.
+static bool dynamic_tx_locked(void) {
+  return (current_safety_mode != SAFETY_SILENT) && (current_safety_mode != SAFETY_NOOUTPUT) &&
+         (current_safety_mode != SAFETY_ALLOUTPUT) && (current_safety_mode != SAFETY_ELM327);
+}
+
+uint8_t safety_clear_dynamic_tx_whitelist(void) {
+  uint8_t ret = DYNAMIC_TX_ERR_LOCKED;
+  if (!dynamic_tx_locked()) {
+    tesla_dynamic_tx_msgs_len = 0U;
+    ret = DYNAMIC_TX_OK;
+  }
+  return ret;
+}
+
+uint8_t safety_add_dynamic_tx_whitelist(uint16_t param1, uint16_t param2) {
+  // Every static Tesla Bus-1 TX/RX-check ID; dynamic rules may never clone or shadow them.
+  static const uint16_t protected_addrs[] = {0x3C2U, 0x249U, 0x679U, 0x300U, 0x301U, 0x3DFU};
+  const uint16_t addr = (uint16_t)(param1 & 0x07FFU);
+  const uint8_t bus = (uint8_t)((param1 >> 11U) & 0x03U);
+  const bool require_engaged = ((param1 >> 13U) & 0x01U) != 0U;
+  const uint8_t len = (uint8_t)(param2 & 0x0FU);
+  const uint16_t raw_interval_ms = (uint16_t)((param2 >> 4U) & 0x0FFFU);
+
+  uint8_t ret = DYNAMIC_TX_OK;
+  if (dynamic_tx_locked()) {
+    ret = DYNAMIC_TX_ERR_LOCKED;
+  } else if (((param1 & 0xC000U) != 0U) || (bus != 1U) || (addr == 0U) || (len == 0U) || (len > 8U)) {
+    ret = DYNAMIC_TX_ERR_INVALID;
+  } else {
+    for (uint8_t i = 0U; i < (uint8_t)(sizeof(protected_addrs) / sizeof(protected_addrs[0])); i++) {
+      if (protected_addrs[i] == addr) {
+        ret = DYNAMIC_TX_ERR_PROTECTED;
+      }
+    }
+    for (uint8_t i = 0U; (ret == DYNAMIC_TX_OK) && (i < tesla_dynamic_tx_msgs_len); i++) {
+      if ((tesla_dynamic_tx_msgs[i].addr == addr) && (tesla_dynamic_tx_msgs[i].bus == bus)) {
+        ret = DYNAMIC_TX_ERR_INVALID;
+      }
+    }
+    if ((ret == DYNAMIC_TX_OK) && (tesla_dynamic_tx_msgs_len >= DYNAMIC_TX_MAX_MSGS)) {
+      ret = DYNAMIC_TX_ERR_FULL;
+    }
+  }
+
+  if (ret == DYNAMIC_TX_OK) {
+    tesla_dynamic_tx_msgs[tesla_dynamic_tx_msgs_len] = (TeslaDynamicTxMsg){
+      .addr = addr,
+      .bus = bus,
+      .len = len,
+      .require_engaged = require_engaged,
+      .min_interval_us = (raw_interval_ms < 10U) ? DYNAMIC_TX_MIN_INTERVAL_US : ((uint32_t)raw_interval_ms * 1000U),
+      .has_tx = false,
+      .last_tx_ts = 0U,
+    };
+    tesla_dynamic_tx_msgs_len++;
+  }
+  return ret;
+}
+
+// Only reached for frames outside the static TX list, in SAFETY_TESLA, without relay malfunction.
+// require_engaged uses controls_allowed (not controls_allowed_lateral), matching the engaged-only 0x249 clone.
+static bool tesla_dynamic_tx_hook(const CANPacket_t *msg) {
+  bool tx = false;
+  if (!tesla_summon && tesla_has_vehicle_bus && !msg->extended && (msg->bus == 1U)) {
+    for (uint8_t i = 0U; i < tesla_dynamic_tx_msgs_len; i++) {
+      TeslaDynamicTxMsg *entry = &tesla_dynamic_tx_msgs[i];
+      if (msg_matches(msg, entry->addr, entry->bus, entry->len)) {
+        const uint32_t ts = microsecond_timer_get();
+        const bool engaged_ok = !entry->require_engaged || controls_allowed;
+        const bool rate_ok = !entry->has_tx || ((uint32_t)(ts - entry->last_tx_ts) >= entry->min_interval_us);
+        if (engaged_ok && rate_ok) {
+          entry->last_tx_ts = ts;
+          entry->has_tx = true;
+          tx = true;
+        }
+        break;
+      }
+    }
+  }
+  return tx;
+}
+
 static safety_config tesla_init(uint16_t param) {
 
   static const CanMsg TESLA_M3_Y_TX_MSGS[] = {
@@ -685,6 +781,12 @@ static safety_config tesla_init(uint16_t param) {
   // this is so that we don't fault if starting while these systems are active
   tesla_summon = true;
   tesla_summon_prev = false;
+
+  // keep the registered dynamic rules (uploaded before entering SAFETY_TESLA), reset only their rate limits
+  for (uint8_t i = 0U; i < tesla_dynamic_tx_msgs_len; i++) {
+    tesla_dynamic_tx_msgs[i].has_tx = false;
+    tesla_dynamic_tx_msgs[i].last_tx_ts = 0U;
+  }
 
   static RxCheck tesla_model3_y_rx_checks[] = {
     TESLA_COMMON_RX_CHECKS
