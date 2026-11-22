@@ -70,9 +70,6 @@ static uint32_t tesla_ambient_tx_ts = 0U;
 static uint32_t tesla_ambient_session_ts = 0U;
 static uint8_t tesla_ambient_session_count = 0U;
 
-static uint64_t tesla_camera_template;
-static uint32_t tesla_camera_rx_ts;
-static bool tesla_camera_valid = false;
 static uint8_t tesla_stalk_template[4];
 static bool tesla_stalk_valid = false;
 static uint32_t tesla_stalk_rx_ts = 0U;
@@ -186,12 +183,6 @@ static int tesla_get_steer_ctrl_type(const int ctrl_type) {
 
 static void tesla_ambient_rx_observer(const CANPacket_t *msg) {
   if (!msg->extended && !msg->returned && !msg->rejected) {
-    if ((msg->bus == 1U) && (msg->addr == 0x3FDU) && (GET_LEN(msg) == 8U) && (msg->data[0] == 1U)) {
-      tesla_camera_template = GET_BYTES_64_LE(msg, 0, 8);
-      tesla_camera_rx_ts = microsecond_timer_get();
-      tesla_camera_valid = true;
-    }
-
     if ((msg->bus == 1U) && (msg->addr == 0x249U)) {
       tesla_stalk_valid = (GET_LEN(msg) == 4U) && ((msg->data[2] & 0xFU) == 0U) &&
                           (msg->data[0] == tesla_stalk_checksum(msg));
@@ -677,18 +668,7 @@ static bool tesla_dynamic_tx_hook(const CANPacket_t *msg) {
         const uint32_t ts = microsecond_timer_get();
         const bool engaged_ok = !entry->require_engaged || controls_allowed;
         const bool rate_ok = !entry->has_tx || ((uint32_t)(ts - entry->last_tx_ts) >= entry->min_interval_us);
-        bool payload_ok = true;
-        if (entry->addr == 0x3FDU) {
-          // MUX 1: only the camera selection nibble may differ from the latest OEM frame.
-          const uint8_t request = msg->data[1] & 0xFU;
-          const uint64_t changed = GET_BYTES_64_LE(msg, 0, 8) ^ tesla_camera_template;
-          payload_ok = (entry->len == 8U) && tesla_camera_valid && (safety_get_ts_elapsed(ts, tesla_camera_rx_ts) <= 300000U) &&
-                       ((changed & ~0xF00ULL) == 0U) && ((request == 0U) || (request == 7U) || (request == 10U));
-        }
-        if (engaged_ok && rate_ok && payload_ok) {
-          if (entry->addr == 0x3FDU) {
-            tesla_camera_valid = false;
-          }
+        if (engaged_ok && rate_ok) {
           entry->last_tx_ts = ts;
           entry->has_tx = true;
           tx = true;
@@ -777,7 +757,6 @@ static safety_config tesla_init(uint16_t param) {
   tesla_auto_speed_limit = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_AUTO_SPEED_LIMIT);
   tesla_ars408_radar = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_ARS408_RADAR);
 
-  tesla_camera_valid = false;
   tesla_stalk_valid = false;
   tesla_stalk_count = 0U;
   tesla_ambient_template_valid = false;
