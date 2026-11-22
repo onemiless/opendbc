@@ -29,6 +29,7 @@ class CarController(CarControllerBase):
     self.coop_steer = CoopSteeringCarController()
     self.speed_limit_controller = TeslaSpeedLimitController(CP_SP)
     self.apply_angle_last = 0
+    self.lat_active = False
     self.steering_angle_sent = 0.0
     self.accel_sent = 0.0
     self.packer = CANPacker(get_party_dbc(CP))
@@ -66,7 +67,10 @@ class CarController(CarControllerBase):
 
     # Wait until the override condition clears before steering
     # Canceling is done on rising edge of CS.out.steeringDisengage and is handled generically with CC.cruiseControl.cancel
-    lat_active = CC.latActive and not CS.out.steeringDisengage and not CS.out.accFaulted
+    # Tesla angle signals are filtered - block engagement on high rate to avoid commanding a lagging value on entry.
+    self.lat_active = (CC.latActive and not CS.out.steeringDisengage and not CS.out.accFaulted
+                       and (self.lat_active or abs(CS.out.steeringRateDeg) < 40.0))
+    lat_active = self.lat_active
     stock_lateral = bool(getattr(CS, "tesla_stock_lateral_active", False))
     entering_stock_lateral = stock_lateral and not self.prev_stock_lateral
     leaving_stock_lateral = not stock_lateral and self.prev_stock_lateral
