@@ -67,10 +67,9 @@ class CarController(CarControllerBase):
 
     # Wait until the override condition clears before steering
     # Canceling is done on rising edge of CS.out.steeringDisengage and is handled generically with CC.cruiseControl.cancel
-    # Tesla angle signals are filtered - block engagement on high rate to avoid commanding a lagging value on entry.
-    self.lat_active = (CC.latActive and not CS.out.steeringDisengage and not CS.out.accFaulted
-                       and (self.lat_active or abs(CS.out.steeringRateDeg) < 40.0))
-    lat_active = self.lat_active
+    lat_requested = CC.latActive and not CS.out.steeringDisengage and not CS.out.accFaulted
+    if not lat_requested:
+      self.lat_active = False
     stock_lateral = bool(getattr(CS, "tesla_stock_lateral_active", False))
     entering_stock_lateral = stock_lateral and not self.prev_stock_lateral
     leaving_stock_lateral = not stock_lateral and self.prev_stock_lateral
@@ -86,6 +85,9 @@ class CarController(CarControllerBase):
       self._log_lateral_transition("leaving_stock_lateral", CC, CS)
 
     if self.frame % 2 == 0 and not stock_lateral:
+      # Tesla angle signals are filtered - block engagement on high rate to avoid commanding a lagging value on entry.
+      self.lat_active = lat_requested and (self.lat_active or abs(CS.out.steeringRateDeg) < 40.0)
+      lat_active = self.lat_active
       # Angular rate limit based on speed
       self.apply_angle_last = apply_steer_angle_limits_vm(actuators.steeringAngleDeg, self.apply_angle_last, CS.out.vEgoRaw, CS.out.steeringAngleDeg,
                                                           lat_active, CarControllerParams, self.VM)

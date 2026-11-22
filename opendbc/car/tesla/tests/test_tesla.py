@@ -971,3 +971,100 @@ class TestTeslaDynamicTxWhitelistConfig(unittest.TestCase):
         self.assertTrue(1 <= length <= 8)
         self.assertIsInstance(require_engaged, bool)
         self.assertTrue(0 <= min_interval_ms <= 0x0FFF)
+
+
+class TestTeslaLateralEntryRateLimit(unittest.TestCase):
+  @staticmethod
+  def _make_controller():
+    from collections import namedtuple
+    SteeringCommand = namedtuple("SteeringCommand", ["steeringAngleDeg", "lat_active"])
+    sent_lat_active = []
+    controller = CarController.__new__(CarController)
+    controller.frame = 0
+    controller.CP = SimpleNamespace(openpilotLongitudinalControl=False)
+    controller.CP_SP = SimpleNamespace(flags=0)
+    controller.apply_angle_last = 0.0
+    controller.lat_active = False
+    controller.steering_angle_sent = 0.0
+    controller.accel_sent = 0.0
+    controller.prev_stock_longitudinal = False
+    controller.prev_stock_lateral = False
+    controller.VM = None
+    controller.ars408_transmitter = SimpleNamespace(update=lambda frame, cs: [])
+    controller.speed_limit_controller = SimpleNamespace(update=lambda cc, cs, now: [])
+    controller.coop_steer = SimpleNamespace(
+      update=lambda angle, lat_active, cp_sp, cs, vm: SteeringCommand(angle, lat_active),
+      reset_override_state=lambda angle: None,
+    )
+    controller.tesla_can = SimpleNamespace(
+      create_steering_control=lambda angle, lat_active: sent_lat_active.append(lat_active) or ("steer", lat_active),
+      create_steering_allowed=lambda: ("allowed",),
+    )
+    return controller, sent_lat_active
+
+  @staticmethod
+  def _step(controller, lat_active=True, steering_rate_deg=0.0, steering_disengage=False, acc_faulted=False):
+    class _Actuators:
+      steeringAngleDeg = 10.0
+      accel = 0.0
+
+      def as_builder(self):
+        return SimpleNamespace(steeringAngleDeg=self.steeringAngleDeg, accel=self.accel)
+
+    cc = SimpleNamespace(
+      latActive=lat_active,
+      actuators=_Actuators(),
+      cruiseControl=SimpleNamespace(cancel=False),
+    )
+    cs = SimpleNamespace(
+      out=SimpleNamespace(
+        steeringDisengage=steering_disengage,
+        accFaulted=acc_faulted,
+        steeringRateDeg=steering_rate_deg,
+        steeringAngleDeg=0.0,
+        vEgoRaw=20.0,
+      ),
+      tesla_stock_lateral_active=False,
+      tesla_stock_longitudinal_active=False,
+    )
+    with patch("opendbc.car.tesla.carcontroller.apply_steer_angle_limits_vm",
+               side_effect=lambda apply_angle, last, v, angle_steers, active, params, vm: apply_angle if active else angle_steers):
+      return controller.update(cc, None, cs, 0)
+
+  def test_blocks_high_rate_on_entry_and_latches_only_on_tx_frame(self):
+    controller, sent = self._make_controller()
+    # Frame 0 (even): |rate| >= 40 blocks entry
+    self._step(controller, lat_active=True, steering_rate_deg=40.0)
+    self.assertEqual([False], sent)
+    self.assertFalse(controller.lat_active)
+    # Frame 1 (odd): low rate on non-TX frame must not prematurely latch
+    self._step(controller, lat_active=True, steering_rate_deg=10.0)
+    self.assertEqual([False], sent)
+    self.assertFalse(controller.lat_active)
+    # Frame 2 (even): high rate still blocks entry
+    self._step(controller, lat_active=True, steering_rate_deg=-45.0)
+    self.assertEqual([False, False], sent)
+    self.assertFalse(controller.lat_active)
+    # Frame 3 (odd), Frame 4 (even): < 40 engages on TX frame
+    self._step(controller, lat_active=True, steering_rate_deg=50.0)
+    self._step(controller, lat_active=True, steering_rate_deg=39.5)
+    self.assertEqual([False, False, True], sent)
+    self.assertTrue(controller.lat_active)
+    # Frame 5 (odd), Frame 6 (even): once engaged, high rate keeps lat_active True
+    self._step(controller, lat_active=True, steering_rate_deg=80.0)
+    self._step(controller, lat_active=True, steering_rate_deg=-80.0)
+    self.assertEqual([False, False, True, True], sent)
+    self.assertTrue(controller.lat_active)
+
+  def test_odd_frame_disengage_clears_latch_for_next_tx_frame(self):
+    controller, sent = self._make_controller()
+    # Frame 0 (even): engage cleanly
+    self._step(controller, lat_active=True, steering_rate_deg=5.0)
+    self.assertEqual([True], sent)
+    # Frame 1 (odd): brief disengage clears latch
+    self._step(controller, lat_active=True, steering_rate_deg=5.0, steering_disengage=True)
+    self.assertFalse(controller.lat_active)
+    # Frame 2 (even): re-entry at high rate is blocked
+    self._step(controller, lat_active=True, steering_rate_deg=50.0)
+    self.assertEqual([True, False], sent)
+    self.assertFalse(controller.lat_active)
