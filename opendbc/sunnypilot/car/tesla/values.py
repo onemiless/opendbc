@@ -7,6 +7,15 @@ See the LICENSE.md file in the root directory for more details.
 from enum import IntFlag
 
 
+TESLA_DYNAMIC_TX_WHITELIST: tuple[tuple[int, int, int, bool, int], ...] = ()
+"""Add future Bus 1 CAN messages with standard 11-bit IDs without reflashing Panda.
+
+Each rule is (bus, addr, len, require_engaged, min_interval_ms).
+Use bus 1 and at most 16 rules. Static/protected IDs 0x3C2, 0x249, 0x679,
+0x300, 0x301, and 0x3DF are forbidden. Firmware enforces a 10 ms interval floor.
+"""
+
+
 class TeslaFlagsSP(IntFlag):
   HAS_VEHICLE_BUS = 1  # Multi-finger infotainment press signal is present on the VEHICLE bus with the deprecated Tesla harness installed
   COOP_STEERING = 2  # Coop steering

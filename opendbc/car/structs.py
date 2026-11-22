@@ -62,8 +62,17 @@ class CarParamsSP:
   pcmCruiseSpeed: bool = auto_field()
   intelligentCruiseButtonManagementAvailable: bool = auto_field()
   enableGasInterceptor: bool = auto_field()
+  dynamicTxRules: list['CarParamsSP.DynamicTxRule'] = field(default_factory=list)
 
   neuralNetworkLateralControl: 'CarParamsSP.NeuralNetworkLateralControl' = field(default_factory=lambda: CarParamsSP.NeuralNetworkLateralControl())
+
+  @auto_dataclass
+  class DynamicTxRule:
+    bus: int = auto_field()
+    addr: int = auto_field()
+    len: int = auto_field()
+    requireEngaged: bool = auto_field()
+    minIntervalMs: int = auto_field()
 
   @auto_dataclass
   class NeuralNetworkLateralControl:

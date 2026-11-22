@@ -5,7 +5,7 @@ from opendbc.car.tesla.carstate import CarState
 from opendbc.car.tesla.values import TeslaSafetyFlags, TeslaFlags, CANBUS, CAR, DBC, FSD_14_FW, Ecu
 from opendbc.sunnypilot.car.tesla.ars408.selector import RADAR_START_ADDR, RadarInterface
 
-from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP, TeslaSafetyFlagsSP
+from opendbc.sunnypilot.car.tesla.values import TESLA_DYNAMIC_TX_WHITELIST, TeslaFlagsSP, TeslaSafetyFlagsSP
 
 
 class CarInterface(CarInterfaceBase):
@@ -70,5 +70,13 @@ class CarInterface(CarInterfaceBase):
     if 0x3DF in fingerprint[1]:
       ret.flags |= TeslaFlagsSP.HAS_VEHICLE_BUS.value
       ret.safetyParam |= TeslaSafetyFlagsSP.HAS_VEHICLE_BUS
+
+    if ret.flags & TeslaFlagsSP.HAS_VEHICLE_BUS:
+      rules = []
+      for bus, addr, length, require_engaged, min_interval_ms in TESLA_DYNAMIC_TX_WHITELIST:
+        if not (bus == 1 and 1 <= addr <= 0x7FF and 1 <= length <= 8 and 0 <= min_interval_ms <= 0x0FFF):
+          raise ValueError(f"Invalid Tesla dynamic TX rule: {(bus, addr, length, require_engaged, min_interval_ms)}")
+        rules.append(structs.CarParamsSP.DynamicTxRule(bus=bus, addr=addr, len=length, requireEngaged=require_engaged, minIntervalMs=min_interval_ms))
+      ret.dynamicTxRules = rules
 
     return ret
