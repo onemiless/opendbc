@@ -42,6 +42,9 @@ static bool tesla_summon_prev = false;
 extern bool tesla_has_vehicle_bus;
 bool tesla_has_vehicle_bus = false;
 
+// Explicit opt-in: a CAN gateway forwards stock Chassis CAN to bus 1 and its 0x24A intent may clone the 0x249 stalk
+static bool tesla_ch_turn_signal = false;
+
 // Configured MADS screen button finger count (0 = disabled, 3-5 = expected touch-point count)
 extern uint8_t tesla_mads_screen_button_fingers;
 uint8_t tesla_mads_screen_button_fingers = 0U;
@@ -485,7 +488,7 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
     const bool counter = (msg->data[1] & 0xFU) == ((tesla_stalk_template[1] + 1U) & 0xFU);
     const bool new_window = (tesla_stalk_count == 0U) || (safety_get_ts_elapsed(now, tesla_stalk_window_ts) >= 10000000U);
     const bool rate = (tesla_stalk_count == 0U) || (safety_get_ts_elapsed(now, tesla_stalk_tx_ts) >= 50000U);
-    if (!tesla_has_vehicle_bus || !controls_allowed || !fresh || !clone || !counter ||
+    if ((!tesla_has_vehicle_bus && !tesla_ch_turn_signal) || !controls_allowed || !fresh || !clone || !counter ||
         ((turn != 2U) && (turn != 6U)) || (msg->data[0] != tesla_stalk_checksum(msg)) ||
         !rate || (!new_window && (tesla_stalk_count >= 30U))) {
       violation = true;
@@ -740,6 +743,7 @@ static safety_config tesla_init(uint16_t param) {
   const uint16_t TESLA_PARAM_SP_AP_HYBRID_LATERAL_HANDOFF = 128;
   const uint16_t TESLA_PARAM_SP_AUTO_SPEED_LIMIT = 1024;
   const uint16_t TESLA_PARAM_SP_ARS408_RADAR = 2048;
+  const uint16_t TESLA_PARAM_SP_CH_TURN_SIGNAL = 4096;
 
   tesla_has_vehicle_bus = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_VEHICLE_BUS);
 
@@ -756,6 +760,7 @@ static safety_config tesla_init(uint16_t param) {
   tesla_ap_hybrid_lateral_handoff = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_AP_HYBRID_LATERAL_HANDOFF);
   tesla_auto_speed_limit = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_AUTO_SPEED_LIMIT);
   tesla_ars408_radar = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_ARS408_RADAR);
+  tesla_ch_turn_signal = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_CH_TURN_SIGNAL);
 
   tesla_stalk_valid = false;
   tesla_stalk_count = 0U;

@@ -35,6 +35,7 @@ class TeslaFlagsSP(IntFlag):
   AUTO_SPEED_LIMIT = 131072  # Config: synchronize Tesla set speed to SP's resolved speed limit
   ARS408_RADAR = 262144  # Config: use isolated external Continental ARS408 backend
   RADAR_DISABLED = 524288  # Config: explicitly disable both Tesla radar backends
+  CH_TURN_SIGNAL = 1048576  # Config: bus 1 CH 0x24A intent may pulse the 0x249 stalk (TeslaChCan + TeslaChTurnSignal)
 
 
 class MadsScreenButtonType:
@@ -54,3 +55,4 @@ class TeslaSafetyFlagsSP:
   SPEED_BUTTON_VALIDATION = 512  # Retired compatibility bit; ignored by safety.
   AUTO_SPEED_LIMIT = 1024
   ARS408_RADAR = 2048
+  CH_TURN_SIGNAL = 4096  # 0x249 clone allowed without HAS_VEHICLE_BUS (CH gateway on bus 1)

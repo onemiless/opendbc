@@ -797,8 +797,8 @@ class TestTeslaNavStalk(unittest.TestCase):
     s = libsafety_py.libsafety
     self.addCleanup(s.set_current_safety_param_sp, 0)
 
-    def reset(vehicle=True, engaged=True):
-      s.set_current_safety_param_sp(TeslaSafetyFlagsSP.HAS_VEHICLE_BUS if vehicle else 0)
+    def reset(param=TeslaSafetyFlagsSP.HAS_VEHICLE_BUS, engaged=True):
+      s.set_current_safety_param_sp(param)
       s.set_safety_hooks(CarParams.SafetyModel.tesla, 0)
       s.init_tests()
       s.set_timer(1_000_000)
@@ -815,10 +815,13 @@ class TestTeslaNavStalk(unittest.TestCase):
         reset(engaged=engaged)
         self.assertTrue(rx(self.frame(15)))
         self.assertEqual(bool(tx(self.frame(0, turn))), engaged and turn in (2, 6))
-    for vehicle in (False, True):
-      reset(vehicle=vehicle)
-      rx(self.frame(15))
-      self.assertEqual(bool(tx(self.frame(0, 6))), vehicle)
+    # The VEHICLE bus flag or the explicit CH turn-signal opt-in (gateway without 0x3DF fingerprint) allows the clone.
+    for param, allowed in ((0, False), (TeslaSafetyFlagsSP.HAS_VEHICLE_BUS, True), (TeslaSafetyFlagsSP.CH_TURN_SIGNAL, True),
+                           (TeslaSafetyFlagsSP.HAS_VEHICLE_BUS | TeslaSafetyFlagsSP.CH_TURN_SIGNAL, True)):
+      for engaged in (False, True):
+        reset(param=param, engaged=engaged)
+        rx(self.frame(15))
+        self.assertEqual(bool(tx(self.frame(0, 6))), allowed and engaged, (param, engaged))
     for bad in (self.frame(1, 6), self.frame(0, 6, upper=0xB0), self.frame(0, 6, tail=0x13),
                 bytearray((0, 0xA0, 6, 0x12))):
       reset()

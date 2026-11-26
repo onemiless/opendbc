@@ -119,6 +119,7 @@ def setup_interfaces(CI, CP: structs.CarParams, CP_SP: structs.CarParamsSP,
   _initialize_tesla_ap_hybrid(CP, CP_SP, params_dict)
   _initialize_tesla_auto_speed_limit(CP, CP_SP, params_dict)
   _initialize_tesla_radar_backend(CP, CP_SP, params_dict)
+  _initialize_tesla_ch_turn_signal(CP, CP_SP, params_dict)
   _initialize_radar_tracks(CP, CP_SP, can_recv, can_send)
   _initialize_stop_and_go(CP, CP_SP, params_dict)
   _initialize_toyota(CP, CP_SP, params_dict)
@@ -184,6 +185,14 @@ def _initialize_tesla_auto_speed_limit(CP: structs.CarParams, CP_SP: structs.Car
       CP_SP.flags & TeslaFlagsSP.HAS_VEHICLE_BUS):
     CP_SP.flags |= TeslaFlagsSP.AUTO_SPEED_LIMIT.value
     CP_SP.safetyParam |= TeslaSafetyFlagsSP.AUTO_SPEED_LIMIT
+
+
+def _initialize_tesla_ch_turn_signal(CP: structs.CarParams, CP_SP: structs.CarParamsSP,
+                                     params_dict: dict[str, str]) -> None:
+  if (CP.brand == "tesla" and int(params_dict.get("TeslaChCan", 0)) == 1 and
+      int(params_dict.get("TeslaChTurnSignal", 0)) == 1):
+    CP_SP.flags |= TeslaFlagsSP.CH_TURN_SIGNAL.value
+    CP_SP.safetyParam |= TeslaSafetyFlagsSP.CH_TURN_SIGNAL
 
 
 def _initialize_tesla_radar_backend(CP: structs.CarParams, CP_SP: structs.CarParamsSP,

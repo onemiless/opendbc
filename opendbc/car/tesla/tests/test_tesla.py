@@ -20,7 +20,7 @@ from opendbc.sunnypilot.car.tesla.carstate_ext import (AP_HYBRID_EXIT_RECOVERY_C
                                                         TeslaLongitudinalSource)
 from opendbc.sunnypilot.car.tesla import dynamic_acc_debug
 from opendbc.sunnypilot.car.interfaces import (_initialize_tesla_ap_hybrid, _initialize_tesla_auto_speed_limit,
-                                               _initialize_tesla_dynamic_auto_stock)
+                                               _initialize_tesla_ch_turn_signal, _initialize_tesla_dynamic_auto_stock)
 from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP, TeslaSafetyFlagsSP
 
 Ecu = CarParams.Ecu
@@ -222,6 +222,18 @@ class TestTeslaLongitudinalHandoff(unittest.TestCase):
     _initialize_tesla_auto_speed_limit(cp, cp_sp, {})
     self.assertFalse(cp_sp.flags & TeslaFlagsSP.AUTO_SPEED_LIMIT)
     self.assertFalse(cp_sp.safetyParam & TeslaSafetyFlagsSP.AUTO_SPEED_LIMIT)
+
+  def test_ch_turn_signal_initialization_requires_both_switches(self):
+    for brand, ch, turn, enabled in (("tesla", "1", "1", True), ("tesla", "1", "0", False), ("tesla", "0", "1", False),
+                                     ("tesla", True, True, True), ("tesla", False, True, False), ("toyota", "1", "1", False)):
+      cp = SimpleNamespace(brand=brand, openpilotLongitudinalControl=False)
+      cp_sp = SimpleNamespace(flags=0, safetyParam=0)
+      _initialize_tesla_ch_turn_signal(cp, cp_sp, {"TeslaChCan": ch, "TeslaChTurnSignal": turn})
+      self.assertEqual(bool(cp_sp.flags & TeslaFlagsSP.CH_TURN_SIGNAL), enabled)
+      self.assertEqual(cp_sp.safetyParam, TeslaSafetyFlagsSP.CH_TURN_SIGNAL if enabled else 0)
+    cp_sp = SimpleNamespace(flags=0, safetyParam=0)
+    _initialize_tesla_ch_turn_signal(SimpleNamespace(brand="tesla"), cp_sp, {})
+    self.assertEqual((cp_sp.flags, cp_sp.safetyParam), (0, 0))
 
   def test_speed_wheel_up_down_gesture_requests_auto_speed_resume(self):
     state = SimpleNamespace(
