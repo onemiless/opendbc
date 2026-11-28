@@ -5,7 +5,11 @@ from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP
 
 SWITCH_STATUS_ADDRESS = 0x3C2
 VEHICLE_BUS = 1
-TEMPLATE_MAX_AGE_NS = 1_500_000_000
+# Native 0x3C2 alternates mux-0 (A) and mux-1 idle (B) with B->A >= 43 ms.
+# Only transmit immediately after observing native B so the frame lands on CAN2
+# well before native A and cannot collide with native 0x3C2 at the same SOF.
+TX_SLOT_NS = 20_000_000
+TEMPLATE_MAX_AGE_NS = TX_SLOT_NS
 MIN_TX_INTERVAL_NS = 500_000_000
 FEEDBACK_TIMEOUT_NS = 1_200_000_000
 FEEDBACK_RETRY_COOLDOWN_NS = 2_000_000_000
@@ -208,7 +212,7 @@ class TeslaSpeedLimitController:
 
     template = getattr(CS, "tesla_speed_button_template", None)
     template_nanos = int(getattr(CS, "tesla_speed_button_template_nanos", 0))
-    if template is None or now_nanos - template_nanos > TEMPLATE_MAX_AGE_NS:
+    if template is None or not 0 <= now_nanos - template_nanos <= TX_SLOT_NS:
       return []
 
     direction = 1 if self.remaining_steps > 0 else -1
