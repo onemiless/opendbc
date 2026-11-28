@@ -41,7 +41,7 @@ def test_speed_wheel_frame_changes_only_signed_right_tick():
 
 def test_controller_sends_one_tick_then_waits_for_speed_feedback():
   controller = TeslaSpeedLimitController(SimpleNamespace(flags=TeslaFlagsSP.AUTO_SPEED_LIMIT))
-  state = fake_state(template_time=2_000_000_000)
+  state = fake_state(template_time=1_540_000_000)
 
   assert controller.update(fake_control(), state, 1_050_000_000) == []
   sends = controller.update(fake_control(), state, 1_550_000_000)
@@ -53,14 +53,15 @@ def test_controller_sends_one_tick_then_waits_for_speed_feedback():
   assert controller.update(fake_control(), state, 1_900_000_000) == []
 
   state.out.cruiseState.speedCluster = 20.3
+  state.tesla_speed_button_template_nanos = 2_140_000_000
   assert len(controller.update(fake_control(), state, 2_150_000_000)) == 1
-  state.tesla_speed_button_template_nanos = 2_200_000_000
+  state.tesla_speed_button_template_nanos = 2_395_000_000
   assert controller.update(fake_control(), state, 2_400_000_000) == []
 
 
 def test_first_target_waits_and_ignores_intermediate_max_change():
   controller = TeslaSpeedLimitController(SimpleNamespace(flags=TeslaFlagsSP.AUTO_SPEED_LIMIT))
-  state = fake_state(current_speed=110.0 / 3.6, target_speed=110.0 / 3.6, template_time=2_000_000_000)
+  state = fake_state(current_speed=110.0 / 3.6, target_speed=110.0 / 3.6, template_time=1_690_000_000)
 
   assert controller.update(fake_control(), state, 1_000_000_000) == []
   state.tesla_speed_limit_target = 100.0 / 3.6
@@ -78,7 +79,7 @@ def test_first_target_waits_and_ignores_intermediate_max_change():
 
 def test_first_transient_110_target_never_ticks_before_settling_at_100():
   controller = TeslaSpeedLimitController(SimpleNamespace(flags=TeslaFlagsSP.AUTO_SPEED_LIMIT))
-  state = fake_state(current_speed=100.0 / 3.6, target_speed=110.0 / 3.6, template_time=2_000_000_000)
+  state = fake_state(current_speed=100.0 / 3.6, target_speed=110.0 / 3.6, template_time=1_690_000_000)
 
   assert controller.update(fake_control(), state, 1_000_000_000) == []
   assert controller.update(fake_control(), state, 1_150_000_000) == []
@@ -90,7 +91,7 @@ def test_first_transient_110_target_never_ticks_before_settling_at_100():
 
 def test_controller_waits_for_changed_target_to_stabilize_before_tick():
   controller = TeslaSpeedLimitController(SimpleNamespace(flags=TeslaFlagsSP.AUTO_SPEED_LIMIT))
-  state = fake_state(current_speed=25.0, target_speed=25.0, template_time=1_500_000_000)
+  state = fake_state(current_speed=25.0, target_speed=25.0, template_time=1_540_000_000)
   assert controller.update(fake_control(), state, 1_000_000_000) == []
 
   state.out.cruiseState.speedCluster = 20.0
@@ -109,6 +110,7 @@ def test_controller_quantizes_target_in_vehicle_display_units():
 
   state.tesla_speed_limit_target = 60.6 * mph
   assert controller.update(fake_control(), state, 1_060_000_000) == []
+  state.tesla_speed_button_template_nanos = 1_550_000_000
   assert len(controller.update(fake_control(), state, 1_560_000_000)) == 1
   assert controller.remaining_steps == 1
 
@@ -134,7 +136,7 @@ def test_controller_never_sends_speed_ticks_while_autopilot_is_active():
 
 def test_controller_does_not_retry_forever_without_feedback():
   controller = TeslaSpeedLimitController(SimpleNamespace(flags=TeslaFlagsSP.AUTO_SPEED_LIMIT))
-  state = fake_state(template_time=2_500_000_000)
+  state = fake_state(template_time=1_540_000_000)
 
   assert controller.update(fake_control(), state, 1_050_000_000) == []
   assert len(controller.update(fake_control(), state, 1_550_000_000)) == 1
@@ -142,13 +144,13 @@ def test_controller_does_not_retry_forever_without_feedback():
   assert controller.update(fake_control(), state, 3_000_000_000) == []
 
   state.out.cruiseState.speedCluster += 1.0 / 3.6
-  state.tesla_speed_button_template_nanos = 3_000_000_000
+  state.tesla_speed_button_template_nanos = 3_090_000_000
   assert len(controller.update(fake_control(), state, 3_100_000_000)) == 1
 
 
 def test_controller_retries_after_bounded_cooldown_without_feedback():
   controller = TeslaSpeedLimitController(SimpleNamespace(flags=TeslaFlagsSP.AUTO_SPEED_LIMIT))
-  state = fake_state(template_time=2_500_000_000)
+  state = fake_state(template_time=1_540_000_000)
 
   assert controller.update(fake_control(), state, 1_050_000_000) == []
   assert len(controller.update(fake_control(), state, 1_550_000_000)) == 1
@@ -161,7 +163,7 @@ def test_controller_retries_after_bounded_cooldown_without_feedback():
 
 def test_controller_caps_retries_when_feedback_never_arrives():
   controller = TeslaSpeedLimitController(SimpleNamespace(flags=TeslaFlagsSP.AUTO_SPEED_LIMIT))
-  state = fake_state(template_time=2_500_000_000)
+  state = fake_state(template_time=1_540_000_000)
 
   assert controller.update(fake_control(), state, 1_050_000_000) == []
   assert len(controller.update(fake_control(), state, 1_550_000_000)) == 1
@@ -325,7 +327,7 @@ def test_manual_override_resets_on_next_sp_engagement():
 
 def test_new_sp_session_starts_with_auto_adjustment_enabled():
   controller = TeslaSpeedLimitController(SimpleNamespace(flags=TeslaFlagsSP.AUTO_SPEED_LIMIT))
-  state = fake_state(template_time=2_000_000_000)
+  state = fake_state(template_time=1_490_000_000)
   controller.update(fake_control(), state, 1_000_000_000)
   assert len(controller.update(fake_control(), state, 1_500_000_000)) == 1
 
@@ -333,7 +335,7 @@ def test_new_sp_session_starts_with_auto_adjustment_enabled():
 @pytest.mark.parametrize("gate", ("invalid_target", "brake", "autopilot", "cancel"))
 def test_manual_override_survives_temporary_control_gates(gate):
   controller = TeslaSpeedLimitController(SimpleNamespace(flags=TeslaFlagsSP.AUTO_SPEED_LIMIT))
-  state = fake_state(template_time=3_000_000_000)
+  state = fake_state(template_time=2_590_000_000)
   controller.update(fake_control(), state, 1_000_000_000)
   state.tesla_manual_speed_adjustment_counter += 1
   controller.update(fake_control(), state, 1_100_000_000)
@@ -355,7 +357,7 @@ def test_manual_override_survives_temporary_control_gates(gate):
 
 def test_wheel_override_and_resume_are_observed_while_cruise_is_disabled():
   controller = TeslaSpeedLimitController(SimpleNamespace(flags=TeslaFlagsSP.AUTO_SPEED_LIMIT))
-  state = fake_state(template_time=3_000_000_000)
+  state = fake_state(template_time=2_490_000_000)
   controller.update(fake_control(enabled=False), state, 1_000_000_000)
   state.tesla_manual_speed_adjustment_counter += 1
   controller.update(fake_control(enabled=False), state, 1_100_000_000)
@@ -371,7 +373,7 @@ def test_wheel_override_and_resume_are_observed_while_cruise_is_disabled():
 @pytest.mark.parametrize("inactive", ("sp", "assist", "ap"))
 def test_wheel_while_inactive_does_not_pause_first_activation(inactive):
   controller = TeslaSpeedLimitController(SimpleNamespace(flags=TeslaFlagsSP.AUTO_SPEED_LIMIT))
-  state = fake_state(template_time=3_000_000_000)
+  state = fake_state(template_time=2_590_000_000)
   control = fake_control(enabled=inactive != "sp")
   state.tesla_speed_limit_assist_enabled = inactive != "assist"
   state.tesla_autopilot_active = inactive == "ap"
@@ -388,7 +390,7 @@ def test_wheel_while_inactive_does_not_pause_first_activation(inactive):
 
 def test_manual_wheel_still_pauses_with_temporarily_missing_limit():
   controller = TeslaSpeedLimitController(SimpleNamespace(flags=TeslaFlagsSP.AUTO_SPEED_LIMIT))
-  state = fake_state(template_time=3_000_000_000)
+  state = fake_state(template_time=2_590_000_000)
   controller.update(fake_control(), state, 1_000_000_000)
   state.tesla_speed_limit_target_valid = False
   state.tesla_manual_speed_adjustment_counter += 1
@@ -401,7 +403,7 @@ def test_manual_wheel_still_pauses_with_temporarily_missing_limit():
 
 def test_explicit_assist_reenable_resumes_without_a_limit_change():
   controller = TeslaSpeedLimitController(SimpleNamespace(flags=TeslaFlagsSP.AUTO_SPEED_LIMIT))
-  state = fake_state(template_time=3_000_000_000)
+  state = fake_state(template_time=2_590_000_000)
   controller.update(fake_control(), state, 1_000_000_000)
   state.tesla_manual_speed_adjustment_counter += 1
   controller.update(fake_control(), state, 1_100_000_000)
@@ -423,11 +425,20 @@ def test_controller_stops_at_target_and_when_controls_are_inactive():
   assert controller.update(fake_control(cancel=True), state, 1_070_000_000) == []
 
 
-def test_controller_rejects_stale_template_or_invalid_limit():
+def test_controller_rejects_outside_post_native_slot_or_invalid_limit():
   controller = TeslaSpeedLimitController(SimpleNamespace(flags=TeslaFlagsSP.AUTO_SPEED_LIMIT))
   state = fake_state(template_time=1_000_000_000)
-  assert controller.update(fake_control(), state, 2_500_000_001) == []
+  assert controller.update(fake_control(), state, 1_000_000_000) == []
 
+  # 44.46 ms after native B (incident danger phase) and just past 20 ms slot must not send.
   state.tesla_speed_button_template_nanos = 1_500_000_000
+  assert controller.update(fake_control(), state, 1_544_460_000) == []
+  assert controller.update(fake_control(), state, 1_520_000_001) == []
+  assert controller.update(fake_control(), state, 1_499_999_999) == []
+
+  # Right inside the 20 ms post-native-B slot transmits cleanly.
+  assert len(controller.update(fake_control(), state, 1_520_000_000)) == 1
+
+  state.tesla_speed_button_template_nanos = 2_100_000_000
   state.tesla_speed_limit_target_valid = False
-  assert controller.update(fake_control(), state, 1_600_000_000) == []
+  assert controller.update(fake_control(), state, 2_110_000_000) == []
