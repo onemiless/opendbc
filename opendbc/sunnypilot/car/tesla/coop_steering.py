@@ -130,14 +130,16 @@ class CoopSteeringCarController:
     return float(np.clip(target_error, -down_step, up_step))
 
   @staticmethod
-  def adjust_slew_for_planner(slew_step: float, apply_angle_step: float, override_torque: float) -> float:
+  def adjust_slew_for_planner(slew_step: float, apply_angle_step: float, override_torque: float,
+                              angle_override: float = 0.0) -> float:
     """
-    Same-direction: subtract planner overlap to avoid double-counting.
+    Same-direction: subtract planner overlap to avoid double-counting while the override starts or grows away from 0.
+    Centering (slew toward 0) is never reduced, or a planner turning the same way would freeze the override.
     Opposing: grow slew opposite to planner, scaled by driver effort.
     """
     direction = slew_step * apply_angle_step
     if direction > 0:
-      return slew_step - apply_bounds(apply_angle_step, abs(slew_step))
+      return slew_step - apply_bounds(apply_angle_step, abs(slew_step)) if slew_step * angle_override >= 0 else slew_step
     if direction < 0:
       driver_effort = abs(override_torque) / STEER_OVERRIDE_TORQUE_RANGE
       return slew_step - driver_effort * apply_angle_step
@@ -178,7 +180,7 @@ class CoopSteeringCarController:
 
     angle_override_target, override_torque = self.compute_override_targets(CS.out.vEgo, CS.out.steeringTorque, VM)
     slew_step = self.override_slew_step(angle_override_target, override_torque)
-    slew_step = self.adjust_slew_for_planner(slew_step, apply_angle_step, override_torque)
+    slew_step = self.adjust_slew_for_planner(slew_step, apply_angle_step, override_torque, self.angle_override)
     self.angle_override += slew_step
 
     apply_angle += self.angle_override
