@@ -74,6 +74,7 @@ class CarStateExt:
     self.tesla_speed_limit_target = 0.0
     self.tesla_speed_limit_target_valid = False
     self.tesla_speed_units = "KPH"
+    self.tesla_speed_limit_step = 1
     self.tesla_manual_speed_adjustment_counter = 0
     self.tesla_speed_auto_resume_gesture_counter = 0
     self.tesla_blindspot_left_level = 0

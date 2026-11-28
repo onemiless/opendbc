@@ -26,7 +26,6 @@ from opendbc.sunnypilot.car.hyundai.longitudinal.helpers import LongitudinalTuni
 from opendbc.sunnypilot.car.hyundai.values import HyundaiFlagsSP
 from opendbc.sunnypilot.car.rivian.values import RivianFlagsSP
 from opendbc.sunnypilot.car.subaru.values_ext import SubaruFlagsSP, SubaruSafetyFlagsSP
-from opendbc.sunnypilot.car.tesla.ars408.constants import TeslaRadarBackend
 from opendbc.sunnypilot.car.tesla.values import MadsScreenButtonType, TeslaFlagsSP, TeslaSafetyFlagsSP
 from opendbc.sunnypilot.car.toyota.values import ToyotaFlagsSP
 
@@ -96,6 +95,12 @@ BSM_FLAGS = {
 }
 
 
+def has_longitudinal_control(CP: structs.CarParams, alpha_preference: bool | None, is_release: bool) -> bool:
+  if not CP.alphaLongitudinalAvailable:
+    return bool(CP.openpilotLongitudinalControl)
+  return CP.brand == "tesla" and not is_release if alpha_preference is None else alpha_preference
+
+
 def has_bsm(CP: structs.CarParams, CP_SP: structs.CarParamsSP | None) -> bool:
   if CP.brand == "tesla":
     return True
@@ -118,7 +123,6 @@ def setup_interfaces(CI, CP: structs.CarParams, CP_SP: structs.CarParamsSP,
   _initialize_tesla_dynamic_auto_stock(CP, CP_SP, params_dict)
   _initialize_tesla_ap_hybrid(CP, CP_SP, params_dict)
   _initialize_tesla_auto_speed_limit(CP, CP_SP, params_dict)
-  _initialize_tesla_radar_backend(CP, CP_SP, params_dict)
   _initialize_tesla_ch_turn_signal(CP, CP_SP, params_dict)
   _initialize_radar_tracks(CP, CP_SP, can_recv, can_send)
   _initialize_stop_and_go(CP, CP_SP, params_dict)
@@ -193,25 +197,6 @@ def _initialize_tesla_ch_turn_signal(CP: structs.CarParams, CP_SP: structs.CarPa
       int(params_dict.get("TeslaChTurnSignal", 0)) == 1):
     CP_SP.flags |= TeslaFlagsSP.CH_TURN_SIGNAL.value
     CP_SP.safetyParam |= TeslaSafetyFlagsSP.CH_TURN_SIGNAL
-
-
-def _initialize_tesla_radar_backend(CP: structs.CarParams, CP_SP: structs.CarParamsSP,
-                                    params_dict: dict[str, str]) -> None:
-  if CP.brand != "tesla":
-    return
-  try:
-    backend = TeslaRadarBackend(int(params_dict.get("TeslaARS408Radar", TeslaRadarBackend.OEM)))
-  except (TypeError, ValueError):
-    backend = TeslaRadarBackend.OFF
-
-  if backend == TeslaRadarBackend.ARS408:
-    CP.radarUnavailable = False
-    CP.deprecated.radarTimeStep = 1.0 / 14.0
-    CP_SP.flags |= TeslaFlagsSP.ARS408_RADAR.value
-    CP_SP.safetyParam |= TeslaSafetyFlagsSP.ARS408_RADAR
-  elif backend == TeslaRadarBackend.OFF:
-    CP.radarUnavailable = True
-    CP_SP.flags |= TeslaFlagsSP.RADAR_DISABLED.value
 
 
 def _initialize_radar_tracks(CP: structs.CarParams, CP_SP: structs.CarParamsSP,

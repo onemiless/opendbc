@@ -1,6 +1,9 @@
 import unittest
+from unittest.mock import patch
 from opendbc.car.can_definitions import CanData
-from opendbc.car.car_helpers import FRAME_FINGERPRINT, can_fingerprint
+from opendbc.car.car_helpers import FRAME_FINGERPRINT, can_fingerprint, get_car
+from opendbc.car import gen_empty_fingerprint
+from opendbc.car.structs import CarParams
 from opendbc.car.fingerprints import _FINGERPRINTS as FINGERPRINTS
 from opendbc.testing import parameterized
 
@@ -21,6 +24,17 @@ class TestCanFingerprint(unittest.TestCase):
       assert finger[0] == fingerprint
       assert finger[1] == fingerprint
       assert finger[2] == {}
+
+  def test_tesla_alpha_default_respects_explicit_choice(self):
+    for candidate, preference, release, expected in (
+      ("TESLA_MODEL_3", None, False, True), ("TESLA_MODEL_3", False, False, False),
+      ("TESLA_MODEL_3", True, False, True), ("TESLA_MODEL_3", None, True, False),
+      ("MOCK", None, False, False),
+    ):
+      result = (candidate, gen_empty_fingerprint(), "0" * 17, [], CarParams.FingerprintSource.fixed, True)
+      with self.subTest(candidate=candidate, preference=preference, release=release), patch("opendbc.car.car_helpers.fingerprint", return_value=result):
+        ci = get_car(None, None, None, preference, release)
+        self.assertEqual(ci.CP.openpilotLongitudinalControl, expected)
 
   def test_timing(self):
     # just pick any CAN fingerprinting car

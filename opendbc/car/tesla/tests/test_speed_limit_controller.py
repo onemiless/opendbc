@@ -23,6 +23,7 @@ def fake_state(current_speed=20.0, target_speed=25.0, template_time=1_000_000_00
     tesla_speed_button_template=IDLE_TEMPLATE,
     tesla_speed_button_template_nanos=template_time,
     tesla_speed_units=speed_units,
+    tesla_speed_limit_step=1,
     tesla_stock_longitudinal_active=stock_longitudinal,
     tesla_autopilot_active=autopilot_active,
     tesla_manual_speed_adjustment_counter=0,
@@ -37,6 +38,25 @@ def fake_control(enabled=True, cancel=False):
 def test_speed_wheel_frame_changes_only_signed_right_tick():
   assert create_speed_wheel_frame(IDLE_TEMPLATE, 1) == bytes.fromhex("2955000100000080")
   assert create_speed_wheel_frame(IDLE_TEMPLATE, -1) == bytes.fromhex("2955003f00000080")
+
+
+@pytest.mark.parametrize("direction", [1, -1])
+@pytest.mark.parametrize("units,unit_ms", [("KPH", 1 / 3.6), ("MPH", 0.44704)])
+def test_five_step_closes_eight_unit_gap_using_feedback(direction, units, unit_ms):
+  controller = TeslaSpeedLimitController(SimpleNamespace(flags=TeslaFlagsSP.AUTO_SPEED_LIMIT))
+  current = 80
+  state = fake_state(current_speed=current * unit_ms, target_speed=(current + 8 * direction) * unit_ms, speed_units=units)
+  state.tesla_speed_limit_step = 5
+  now = 1_000_000_000
+  assert controller.update(fake_control(), state, now) == []
+  for step in (5, 1, 1, 1):
+    now += 600_000_000
+    state.tesla_speed_button_template_nanos = now
+    data = controller.update(fake_control(), state, now)[0].dat
+    assert data == IDLE_TEMPLATE[:3] + bytes([(direction * step) & 0x3F]) + IDLE_TEMPLATE[4:]
+    current += step * direction
+    state.out.cruiseState.speedCluster = current * unit_ms
+  assert controller.update(fake_control(), state, now + 600_000_000) == []
 
 
 def test_controller_sends_one_tick_then_waits_for_speed_feedback():

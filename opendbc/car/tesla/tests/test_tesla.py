@@ -1002,7 +1002,6 @@ class TestTeslaLateralEntryRateLimit(unittest.TestCase):
     controller.prev_stock_longitudinal = False
     controller.prev_stock_lateral = False
     controller.VM = None
-    controller.ars408_transmitter = SimpleNamespace(update=lambda frame, cs: [])
     controller.speed_limit_controller = SimpleNamespace(update=lambda cc, cs, now: [])
     controller.coop_steer = SimpleNamespace(
       update=lambda angle, lat_active, cp_sp, cs, vm: SteeringCommand(angle, lat_active),

@@ -27,7 +27,7 @@ From the submodule root:
 
 ```sh
 PYTHONPATH=. python opendbc/car/tesla/tests/steering_protocol_e2e.py /tmp/steering-protocol.json
-PYTHONPATH=. python -m pytest opendbc/car/tesla/tests opendbc/sunnypilot/car/tesla/ars408/tests opendbc/sunnypilot/car/tesla/tests opendbc/safety/tests/test_tesla.py opendbc/safety/tests/test_defaults.py opendbc/sunnypilot/car/tests/test_has_bsm.py -q
+PYTHONPATH=. python -m pytest opendbc/car/tesla/tests opendbc/sunnypilot/car/tesla/tests opendbc/safety/tests/test_tesla.py opendbc/safety/tests/test_defaults.py opendbc/sunnypilot/car/tests/test_has_bsm.py -q
 ```
 
 The E2E artifact records four real synthetic-CAN-to-controller-to-compiled-safety paths, exact steering bytes, source identity and script SHA-256. It proves host behavior; physical CAN, EPS behavior and deployed firmware require separate bench/vehicle verification.

@@ -22,8 +22,8 @@ MPH_TO_MS = 0.44704
 def create_speed_wheel_frame(template: bytes, tick: int) -> bytes:
   if len(template) != 8 or (template[0] & 0x03) != 1 or (template[3] & 0x3F) != 0:
     raise ValueError("Tesla speed-wheel template must be an idle 0x3C2 mux-1 frame")
-  if tick not in (-1, 1):
-    raise ValueError("Tesla speed-wheel tick must be -1 or +1")
+  if tick not in (-5, -1, 1, 5):
+    raise ValueError("Tesla speed-wheel tick must be ±1 or ±5")
 
   data = bytearray(template)
   data[3] = (data[3] & 0xC0) | (tick & 0x3F)
@@ -216,7 +216,8 @@ class TeslaSpeedLimitController:
       return []
 
     direction = 1 if self.remaining_steps > 0 else -1
-    data = create_speed_wheel_frame(template, direction)
+    step = 5 if CS.tesla_speed_limit_step == 5 and abs(self.remaining_steps) >= 5 else 1
+    data = create_speed_wheel_frame(template, direction * step)
     self.last_tx_nanos = now_nanos
     self.pending_since_nanos = now_nanos
     self.pending_direction = direction

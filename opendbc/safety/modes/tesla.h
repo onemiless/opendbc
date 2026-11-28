@@ -66,7 +66,6 @@ static bool tesla_ap_hybrid_handoff = false;
 static bool tesla_ap_hybrid_lateral_handoff = false;
 static bool tesla_ap_stock_lateral_active = false;
 static bool tesla_auto_speed_limit = false;
-static bool tesla_ars408_radar = false;
 static bool tesla_speed_button_rx_template_valid = false;
 static uint8_t tesla_speed_button_rx_template[8] = {0U};
 static uint32_t tesla_speed_button_rx_timestamp = 0U;
@@ -519,10 +518,11 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
     }
   }
 
-  // Right scroll wheel: one signed tick cloned from a fresh vehicle RX frame.
+  // Right scroll wheel: a signed one- or five-tick movement cloned from a fresh vehicle RX frame.
   if (msg->addr == 0x3C2U) {
     const uint8_t right_scroll_ticks = msg->data[3] & 0x3FU;
-    const bool tick_allowed = (right_scroll_ticks == 1U) || (right_scroll_ticks == 0x3FU);
+    const bool tick_allowed = (right_scroll_ticks == 1U) || (right_scroll_ticks == 0x3FU) ||
+                              (right_scroll_ticks == 5U) || (right_scroll_ticks == 0x3BU);
     bool template_matches = (msg->data[3] & 0xC0U) == (tesla_speed_button_rx_template[3] & 0xC0U);
     for (uint8_t i = 0U; i < 8U; i++) {
       if (i != 3U) {
@@ -541,24 +541,6 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
     } else {
       tesla_speed_button_last_tx_valid = true;
       tesla_speed_button_last_tx_timestamp = microsecond_timer_get();
-    }
-  }
-
-  // Continental ARS408 ego-motion input. The TX allowlist independently
-  // constrains these messages to bus 1 with exactly two data bytes.
-  if (msg->addr == 0x300U) {
-    const uint8_t direction = msg->data[0] >> 6;
-    const uint16_t speed_raw = ((msg->data[0] & 0x1FU) << 8) | msg->data[1];
-    const bool direction_matches_speed = ((direction == 0U) && (speed_raw == 0U)) ||
-                                         ((direction > 0U) && (direction <= 2U) && (speed_raw > 0U));
-    if (!tesla_ars408_radar || ((msg->data[0] & 0x20U) != 0U) || (speed_raw > 4250U) || !direction_matches_speed) {
-      violation = true;
-    }
-  }
-  if (msg->addr == 0x301U) {
-    const uint16_t yaw_rate_raw = (msg->data[0] << 8) | msg->data[1];
-    if (!tesla_ars408_radar || (yaw_rate_raw < 22768U) || (yaw_rate_raw > 42768U)) {
-      violation = true;
     }
   }
 
@@ -718,28 +700,6 @@ static safety_config tesla_init(uint16_t param) {
     {0x679, 1, 7, .check_relay = false, .disable_static_blocking = true}, // Bounded blindspot ambient lighting
   };
 
-  static const CanMsg TESLA_M3_Y_ARS408_TX_MSGS[] = {
-    {0x488, 0, 4, .check_relay = true, .disable_static_blocking = true},
-    {0x2b9, 0, 8, .check_relay = false},
-    {0x27D, 0, 3, .check_relay = true, .disable_static_blocking = true},
-    {0x3C2, 1, 8, .check_relay = false, .disable_static_blocking = true},
-    {0x249, 1, 4, .check_relay = false, .disable_static_blocking = true}, // Bounded turn-stalk clone
-    {0x679, 1, 7, .check_relay = false, .disable_static_blocking = true}, // Bounded blindspot ambient lighting
-    {0x300, 1, 2, .check_relay = false, .disable_static_blocking = true},
-    {0x301, 1, 2, .check_relay = false, .disable_static_blocking = true},
-  };
-
-  static const CanMsg TESLA_M3_Y_LONG_ARS408_TX_MSGS[] = {
-    {0x488, 0, 4, .check_relay = true, .disable_static_blocking = true},
-    {0x2b9, 0, 8, .check_relay = true, .disable_static_blocking = true},
-    {0x27D, 0, 3, .check_relay = true, .disable_static_blocking = true},
-    {0x3C2, 1, 8, .check_relay = false, .disable_static_blocking = true},
-    {0x249, 1, 4, .check_relay = false, .disable_static_blocking = true}, // Bounded turn-stalk clone
-    {0x679, 1, 7, .check_relay = false, .disable_static_blocking = true}, // Bounded blindspot ambient lighting
-    {0x300, 1, 2, .check_relay = false, .disable_static_blocking = true},
-    {0x301, 1, 2, .check_relay = false, .disable_static_blocking = true},
-  };
-
   const uint16_t TESLA_FLAG_FSD_14 = 2;
   const uint16_t TESLA_FLAG_STEERING_3_BIT = 4;
   tesla_steering_3_bit = GET_FLAG(param, TESLA_FLAG_STEERING_3_BIT);
@@ -757,7 +717,6 @@ static safety_config tesla_init(uint16_t param) {
   const uint16_t TESLA_PARAM_SP_AP_HYBRID_HANDOFF = 64;
   const uint16_t TESLA_PARAM_SP_AP_HYBRID_LATERAL_HANDOFF = 128;
   const uint16_t TESLA_PARAM_SP_AUTO_SPEED_LIMIT = 1024;
-  const uint16_t TESLA_PARAM_SP_ARS408_RADAR = 2048;
   const uint16_t TESLA_PARAM_SP_CH_TURN_SIGNAL = 4096;
 
   tesla_has_vehicle_bus = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_VEHICLE_BUS);
@@ -774,7 +733,6 @@ static safety_config tesla_init(uint16_t param) {
   tesla_ap_hybrid_handoff = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_AP_HYBRID_HANDOFF);
   tesla_ap_hybrid_lateral_handoff = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_AP_HYBRID_LATERAL_HANDOFF);
   tesla_auto_speed_limit = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_AUTO_SPEED_LIMIT);
-  tesla_ars408_radar = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_ARS408_RADAR);
   tesla_ch_turn_signal = GET_FLAG(current_safety_param_sp, TESLA_PARAM_SP_CH_TURN_SIGNAL);
 
   tesla_stalk_valid = false;
@@ -830,12 +788,8 @@ static safety_config tesla_init(uint16_t param) {
   };
 
   safety_config ret;
-  if (tesla_longitudinal && tesla_ars408_radar) {
-    SET_TX_MSGS(TESLA_M3_Y_LONG_ARS408_TX_MSGS, ret);
-  } else if (tesla_longitudinal) {
+  if (tesla_longitudinal) {
     SET_TX_MSGS(TESLA_M3_Y_LONG_TX_MSGS, ret);
-  } else if (tesla_ars408_radar) {
-    SET_TX_MSGS(TESLA_M3_Y_ARS408_TX_MSGS, ret);
   } else {
     SET_TX_MSGS(TESLA_M3_Y_TX_MSGS, ret);
   }

@@ -3,7 +3,7 @@ from opendbc.car.interfaces import CarInterfaceBase
 from opendbc.car.tesla.carcontroller import CarController
 from opendbc.car.tesla.carstate import CarState
 from opendbc.car.tesla.values import TeslaSafetyFlags, TeslaFlags, CANBUS, CAR, DBC, FSD_14_FW, Ecu
-from opendbc.sunnypilot.car.tesla.ars408.selector import RADAR_START_ADDR, RadarInterface
+from opendbc.car.tesla.radar_interface import RADAR_START_ADDR, RadarInterface
 
 from opendbc.sunnypilot.car.tesla.values import TESLA_DYNAMIC_TX_WHITELIST, TeslaFlagsSP, TeslaSafetyFlagsSP
 
@@ -37,7 +37,7 @@ class CarInterface(CarInterfaceBase):
     ret.radarUnavailable = RADAR_START_ADDR not in fingerprint[1] or Bus.radar not in DBC[candidate]
 
     ret.alphaLongitudinalAvailable = True
-    if alpha_long:
+    if ret.alphaLongitudinalAvailable and alpha_long:
       ret.openpilotLongitudinalControl = True
       ret.safetyConfigs[0].safetyParam |= TeslaSafetyFlags.LONG_CONTROL.value
 

@@ -20,8 +20,6 @@ MSG_DAS_steeringControl = 0x488
 MSG_APS_eacMonitor = 0x27d
 MSG_DAS_Control = 0x2b9
 MSG_VCLEFT_SWITCH_STATUS = 0x3C2
-MSG_ARS408_SPEED = 0x300
-MSG_ARS408_YAW_RATE = 0x301
 OBSERVED_SPEED_WHEEL_IDLE = bytes.fromhex("010000c000000000")
 
 
@@ -160,61 +158,14 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
     self.safety.set_safety_hooks(CarParams.SafetyModel.tesla, self.SAFETY_PARAM)
     self.safety.init_tests()
 
-  def _enable_ars408_radar(self):
+  def test_removed_radar_flag_cannot_enable_motion_frames(self):
     self.addCleanup(self.safety.set_current_safety_param_sp, 0)
-    self.safety.set_current_safety_param_sp(TeslaSafetyFlagsSP.ARS408_RADAR)
+    self.safety.set_current_safety_param_sp(2048)  # Previously persisted external radar flag.
     self.safety.set_safety_hooks(CarParams.SafetyModel.tesla, self.SAFETY_PARAM)
     self.safety.init_tests()
     self.assertTrue(self._rx(self._pcm_status_msg(False)))
-
-  @staticmethod
-  def _ars408_speed_msg(raw_speed, direction, bus=CANBUS.vehicle, length=2, reserved=False):
-    payload = bytearray(max(length, 2))
-    payload[0] = ((direction & 0x3) << 6) | ((raw_speed >> 8) & 0x1F) | (0x20 if reserved else 0)
-    payload[1] = raw_speed & 0xFF
-    return libsafety_py.make_CANPacket(MSG_ARS408_SPEED, bus, payload[:length])
-
-  @staticmethod
-  def _ars408_yaw_msg(raw_yaw_rate, bus=CANBUS.vehicle, length=2):
-    payload = bytearray(max(length, 2))
-    payload[0] = (raw_yaw_rate >> 8) & 0xFF
-    payload[1] = raw_yaw_rate & 0xFF
-    return libsafety_py.make_CANPacket(MSG_ARS408_YAW_RATE, bus, payload[:length])
-
-  def test_ars408_motion_requires_feature_flag(self):
-    self.assertFalse(self._tx(self._ars408_speed_msg(1000, 1)))
-    self.assertFalse(self._tx(self._ars408_yaw_msg(32768)))
-
-  def test_ars408_motion_requires_exact_bus_and_dlc(self):
-    self._enable_ars408_radar()
-    self.assertTrue(self._tx(self._ars408_speed_msg(1000, 1)))
-    self.assertTrue(self._tx(self._ars408_yaw_msg(32768)))
-    for bus in (0, 2):
-      self.assertFalse(self._tx(self._ars408_speed_msg(1000, 1, bus=bus)))
-      self.assertFalse(self._tx(self._ars408_yaw_msg(32768, bus=bus)))
-    for length in (1, 3, 8):
-      self.assertFalse(self._tx(self._ars408_speed_msg(1000, 1, length=length)))
-      self.assertFalse(self._tx(self._ars408_yaw_msg(32768, length=length)))
-
-  def test_ars408_speed_fields_and_operational_range(self):
-    self._enable_ars408_radar()
-    for raw_speed, direction in ((0, 0), (1, 1), (4250, 2)):
-      self.assertTrue(self._tx(self._ars408_speed_msg(raw_speed, direction)))
-    for raw_speed, direction, reserved in ((4251, 1, False), (1000, 0, False), (0, 1, False),
-                                           (1000, 3, False), (1000, 1, True)):
-      self.assertFalse(self._tx(self._ars408_speed_msg(raw_speed, direction, reserved=reserved)))
-
-  def test_ars408_yaw_rate_operational_range(self):
-    self._enable_ars408_radar()
-    for raw_yaw_rate in (22768, 32768, 42768):
-      self.assertTrue(self._tx(self._ars408_yaw_msg(raw_yaw_rate)))
-    for raw_yaw_rate in (22767, 42769):
-      self.assertFalse(self._tx(self._ars408_yaw_msg(raw_yaw_rate)))
-
-  def test_ars408_configuration_frames_remain_blocked(self):
-    self._enable_ars408_radar()
-    for address, length in ((0x200, 8), (0x202, 5)):
-      self.assertFalse(self._tx(libsafety_py.make_CANPacket(address, CANBUS.vehicle, b"\x00" * length)))
+    for address, payload in ((0x300, b"\x43\xe8"), (0x301, b"\x80\x00")):
+      self.assertFalse(self._tx(libsafety_py.make_CANPacket(address, CANBUS.vehicle, payload)))
 
   def test_auto_speed_limit_requires_controls_allowed(self):
     self._enable_auto_speed_limit()
@@ -222,6 +173,14 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
     self.assertFalse(self._tx(self._speed_wheel_msg(1)))
     self.safety.set_controls_allowed(True)
     self.assertTrue(self._tx(self._speed_wheel_msg(1)))
+
+  def test_auto_speed_limit_only_allows_signed_one_and_five_ticks(self):
+    self._enable_auto_speed_limit()
+    self.safety.set_controls_allowed(True)
+    for tick in range(-32, 32):
+      self.safety.set_timer((tick + 32) * 500000)
+      self.assertTrue(self._rx(self._speed_wheel_msg(0)))
+      self.assertEqual(self._tx(self._speed_wheel_msg(tick)), tick in (-5, -1, 1, 5))
 
   def _accel_msg(self, accel: float):
     # For common.LongitudinalAccelSafetyTest
