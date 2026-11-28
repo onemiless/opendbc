@@ -50,6 +50,8 @@ class CarController(CarControllerBase):
 
   def update(self, CC, CC_SP, CS, now_nanos):
     actuators = CC.actuators
+    if getattr(CS, "stock_parking", False):
+      return self._yield_to_stock_parking(actuators, CS)
     can_sends = []
     can_sends.extend(self.ars408_transmitter.update(self.frame, CS.out))
     speed_limit_sends = self.speed_limit_controller.update(CC, CS, now_nanos)
@@ -161,6 +163,21 @@ class CarController(CarControllerBase):
     self.prev_stock_lateral = stock_lateral
     self.frame += 1
     return new_actuators, can_sends
+
+  def _yield_to_stock_parking(self, actuators, CS):
+    # Autopark/Summon: panda forwards the OEM 0x488/0x27D/0x2B9 and blocks ours, so send nothing.
+    # Track the wheel and OEM counter so control resumes without an angle jump or counter clash.
+    self.lat_active = False
+    self.apply_angle_last = CS.out.steeringAngleDeg
+    self.coop_steer.reset_override_state(self.apply_angle_last)
+    self.steering_angle_sent = CS.out.steeringAngleDeg
+    self.accel_sent = 0.0
+    self.long_control_counter = None
+    self.frame += 1
+    new_actuators = actuators.as_builder()
+    new_actuators.steeringAngleDeg = self.steering_angle_sent
+    new_actuators.accel = self.accel_sent
+    return new_actuators, []
 
   def _next_long_control_counter(self, stock_counter, resync=False):
     if self.long_control_counter is None or resync:

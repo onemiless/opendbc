@@ -374,6 +374,58 @@ class TestTeslaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest, 
       self.assertTrue(self._tx(self._long_control_msg(0, acc_state=self.acc_states["ACC_CANCEL_GENERIC_SILENT"])))
       self.assertEqual(self.LONGITUDINAL, self._tx(self._long_control_msg(0, acc_state=self.acc_states["ACC_ON"])))
 
+  def _oem_das_control(self, acc_state):
+    self.__class__.cnt_das = (getattr(self, "cnt_das", 0) + 1) % 8
+    return self._long_control_msg(0, acc_state=acc_state, bus=2, counter=self.cnt_das)
+
+  def _sp_msgs_tx(self):
+    eac = self.packer.make_can_msg_safety("APS_eacMonitor", 0, {"APS_eacAllow": 1})
+    long_state = self.acc_states["ACC_ON"] if self.LONGITUDINAL else self.acc_states["ACC_CANCEL_GENERIC_SILENT"]
+    return {MSG_DAS_steeringControl: self._tx(self._angle_cmd_msg(0, False)),
+            MSG_APS_eacMonitor: self._tx(eac),
+            MSG_DAS_Control: self._tx(self._long_control_msg(0, acc_state=long_state))}
+
+  def test_autopark_yields_while_mads_lateral_allowed(self):
+    # Autopark (DAS_accState APC_*) must take over even though MADS keeps controls_allowed_lateral at standstill
+    # Active maneuver states only; terminal COMPLETE/ABORT/UNPARK_COMPLETE hand control back
+    apc_states = [self.acc_states[s] for s in ("APC_BACKWARD", "APC_FORWARD", "APC_PAUSE", "APC_SELFPARK_START")]
+    for acc_state in range(16):
+      with self.subTest(acc_state=acc_state):
+        self.safety.init_tests()
+        self._rx(self._pcm_status_msg(False))
+        self.safety.set_controls_allowed_lateral(True)
+        self.assertTrue(all(self._sp_msgs_tx().values()))
+
+        self.assertTrue(self._rx(self._oem_das_control(acc_state)))
+        autopark = acc_state in apc_states
+        for addr in (MSG_APS_eacMonitor, MSG_DAS_steeringControl, MSG_DAS_Control):
+          blocked = (not autopark) and (addr != MSG_DAS_Control or self.LONGITUDINAL)
+          self.assertEqual(-1 if blocked else 0, self.safety.safety_fwd_hook(2, addr))
+        self.assertEqual({a: not autopark for a in (MSG_DAS_steeringControl, MSG_APS_eacMonitor, MSG_DAS_Control)},
+                         self._sp_msgs_tx())
+
+        # OEM cruise state during Autopark never engages controls
+        self._rx(self._pcm_status_msg(True))
+        self.assertEqual(not autopark, self.safety.get_controls_allowed())
+        self._rx(self._pcm_status_msg(False))
+
+        # Autopark exit restores SP ownership without re-initialization
+        self.assertTrue(self._rx(self._oem_das_control(0)))
+        self.assertEqual(-1, self.safety.safety_fwd_hook(2, MSG_APS_eacMonitor))
+        self.assertEqual(-1, self.safety.safety_fwd_hook(2, MSG_DAS_steeringControl))
+        self.assertTrue(all(self._sp_msgs_tx().values()))
+
+  def test_autopark_preempts_engagement(self):
+    # Order-independent: DI_state may report cruise ENABLED before the first APC frame arrives
+    self._rx(self._pcm_status_msg(False))
+    self._rx(self._pcm_status_msg(True))
+    self.assertTrue(self.safety.get_controls_allowed())
+    self.assertTrue(self._rx(self._oem_das_control(self.acc_states["APC_BACKWARD"])))
+    self.assertEqual(0, self.safety.safety_fwd_hook(2, MSG_DAS_steeringControl))
+    self.assertFalse(self._tx(self._angle_cmd_msg(0, True)))
+    self._rx(self._pcm_status_msg(True))
+    self.assertFalse(self.safety.get_controls_allowed())
+
   def test_steering_control_type(self):
     # Angle control and LANE_KEEP_ASSIST are allowed (no EMERGENCY_LANE_KEEP)
     self.safety.set_controls_allowed(True)

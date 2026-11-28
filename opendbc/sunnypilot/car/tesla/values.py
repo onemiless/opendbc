@@ -36,6 +36,7 @@ class TeslaFlagsSP(IntFlag):
   ARS408_RADAR = 262144  # Config: use isolated external Continental ARS408 backend
   RADAR_DISABLED = 524288  # Config: explicitly disable both Tesla radar backends
   CH_TURN_SIGNAL = 1048576  # Config: bus 1 CH 0x24A intent may pulse the 0x249 stalk (TeslaChCan + TeslaChTurnSignal)
+  STOCK_PARKING_ACTIVE = 2097152  # Runtime: Tesla Autopark/Summon owns all actuation; sunnypilot yields
 
 
 class MadsScreenButtonType:

@@ -7,6 +7,7 @@ from opendbc.car.interfaces import CarStateBase
 from opendbc.car.vehicle_model import VehicleModel
 from opendbc.car.tesla.teslacan import get_steer_ctrl_type
 from opendbc.car.tesla.values import CANBUS, GEAR_MAP, STEER_DISENGAGE_THRESHOLD, STEER_THRESHOLD, TeslaFlags, get_party_dbc
+from opendbc.sunnypilot.car.tesla.values import TeslaFlagsSP
 
 from opendbc.sunnypilot.car.tesla.carstate_ext import CarStateExt
 
@@ -33,6 +34,7 @@ class CarState(CarStateBase, CarStateExt):
 
     self.summon = False
     self.summon_prev = False
+    self.autopark = False
     self.cruise_override = False
     self.cruise_enabled_prev = False
 
@@ -50,6 +52,10 @@ class CarState(CarStateBase, CarStateExt):
       self.summon = False
     self.summon_prev = summon_now
     self.cruise_enabled_prev = cruise_enabled
+
+  @property
+  def stock_parking(self) -> bool:
+    return self.summon or self.autopark
 
   def update(self, can_parsers) -> tuple[structs.CarState, structs.CarStateSP]:
     cp_party = can_parsers[Bus.party]
@@ -108,9 +114,11 @@ class CarState(CarStateBase, CarStateExt):
     cruise_enabled = cruise_state in ("ENABLED", "STANDSTILL", "OVERRIDE", "PRE_FAULT", "PRE_CANCEL")
     self.cruise_override = cruise_state in ("OVERRIDE")
     self.update_summon_state(summon_state, cruise_enabled)
+    # Match panda safety: Autopark maneuver states APC_BACKWARD, APC_FORWARD, APC_PAUSE, APC_SELFPARK_START
+    self.autopark = int(cp_ap_party.vl["DAS_control"]["DAS_accState"]) in (5, 6, 9, 11)
 
     # Match panda safety cruise engaged logic
-    ret.cruiseState.enabled = cruise_enabled and not self.summon
+    ret.cruiseState.enabled = cruise_enabled and not self.stock_parking
     if speed_units == "KPH":
       ret.cruiseState.speedCluster = cp_party.vl["DI_state"]["DI_digitalSpeed"] * CV.KPH_TO_MS
     elif speed_units == "MPH":
@@ -209,6 +217,10 @@ class CarState(CarStateBase, CarStateExt):
     # carState/carStateSP publication race.
     if suppress_invalid_lkas or self._ap_hybrid_lkas_suppressed(autopilot_state):
       ret.invalidLkasSetting = False
+    # Tesla Autopark/Summon reports an active autopilot state; it is not a user LKAS setting
+    if self.stock_parking:
+      ret.invalidLkasSetting = False
+      ret_sp.flags |= TeslaFlagsSP.STOCK_PARKING_ACTIVE.value
 
     return ret, ret_sp
 

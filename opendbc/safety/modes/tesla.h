@@ -38,6 +38,15 @@ static bool tesla_stock_steering_control_prev = false;
 static bool tesla_summon = false;
 static bool tesla_summon_prev = false;
 
+// Autopark: the AP ECU drives DAS_control with APC_* states. DI_autoparkState is
+// Summon-only, and MADS keeps controls_allowed_lateral at standstill, so neither
+// the Summon nor the stock steering rising-edge path catches it.
+static bool tesla_autopark = false;
+
+static bool tesla_stock_parking(void) {
+  return tesla_summon || tesla_autopark;
+}
+
 // Detected VEHICLE bus
 extern bool tesla_has_vehicle_bus;
 bool tesla_has_vehicle_bus = false;
@@ -272,7 +281,7 @@ static void tesla_rx_hook(const CANPacket_t *msg) {
                             (cruise_state == 4) ||  // OVERRIDE
                             (cruise_state == 6) ||  // PRE_FAULT
                             (cruise_state == 7);    // PRE_CANCEL
-      cruise_engaged = cruise_engaged && !tesla_summon;
+      cruise_engaged = cruise_engaged && !tesla_stock_parking();
 
       pcm_cruise_check(cruise_engaged);
     }
@@ -307,6 +316,12 @@ static void tesla_rx_hook(const CANPacket_t *msg) {
     if (msg->addr == 0x2b9U) {
       // "AEB_ACTIVE"
       tesla_stock_aeb = (msg->data[2] & 0x03U) == 1U;
+
+      // Active maneuver only: APC_BACKWARD, APC_FORWARD, APC_PAUSE, APC_SELFPARK_START.
+      // No engagement gate: DI_state may report cruise before the first APC frame, and
+      // yielding to the OEM parking maneuver only removes sunnypilot actuation.
+      int acc_state = msg->data[1] >> 4;
+      tesla_autopark = (acc_state == 5) || (acc_state == 6) || (acc_state == 9) || (acc_state == 11);
     }
 
     // DAS_steeringControl
@@ -352,8 +367,8 @@ static bool tesla_tx_hook(const CANPacket_t *msg) {
   bool longitudinal_takeover = false;
   bool lateral_takeover = false;
 
-  // Don't send any messages when Autopark is active
-  if (tesla_summon) {
+  // Don't send any messages when Autopark/Summon is active
+  if (tesla_stock_parking()) {
     violation = true;
   }
 
@@ -565,7 +580,7 @@ static bool tesla_fwd_hook(int bus_num, int addr) {
   bool block_msg = false;
 
   if (bus_num == 2) {
-    if (!tesla_summon) {
+    if (!tesla_stock_parking()) {
       // APS_eacMonitor
       if (addr == 0x27d) {
         block_msg = true;
@@ -664,7 +679,7 @@ uint8_t safety_add_dynamic_tx_whitelist(uint16_t param1, uint16_t param2) {
 // require_engaged uses controls_allowed (not controls_allowed_lateral), matching the engaged-only 0x249 clone.
 static bool tesla_dynamic_tx_hook(const CANPacket_t *msg) {
   bool tx = false;
-  if (!tesla_summon && tesla_has_vehicle_bus && !msg->extended && (msg->bus == 1U)) {
+  if (!tesla_stock_parking() && tesla_has_vehicle_bus && !msg->extended && (msg->bus == 1U)) {
     for (uint8_t i = 0U; i < tesla_dynamic_tx_msgs_len; i++) {
       TeslaDynamicTxMsg *entry = &tesla_dynamic_tx_msgs[i];
       if (msg_matches(msg, entry->addr, entry->bus, entry->len)) {
@@ -786,6 +801,7 @@ static safety_config tesla_init(uint16_t param) {
   // this is so that we don't fault if starting while these systems are active
   tesla_summon = true;
   tesla_summon_prev = false;
+  tesla_autopark = false;
 
   // keep the registered dynamic rules (uploaded before entering SAFETY_TESLA), reset only their rate limits
   for (uint8_t i = 0U; i < tesla_dynamic_tx_msgs_len; i++) {
